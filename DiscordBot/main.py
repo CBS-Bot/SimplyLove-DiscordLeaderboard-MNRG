@@ -76,7 +76,7 @@ async def help(Interaction: discord.Interaction):
 #================================================================================================
 
 @client.tree.command(name="usethischannel", description="(Un)Set the current channel as the results channel. (Admin only)")
-@commands.has_permissions(administrator=True)
+@app_commands.checks.has_permissions(administrator=True)
 async def usethischannel(Interaction: discord.Interaction):
     if Interaction.guild is None:
         await Interaction.response.send_message("This command can only be used in a server.")
