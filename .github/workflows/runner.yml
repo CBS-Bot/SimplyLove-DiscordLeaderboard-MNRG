@@ -27,6 +27,7 @@ jobs:
         with:
           envkey_BOT_URL: ${{ secrets.SERVER_URL }}
           envkey_DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+          envkey_DATE_FORMAT: "%d-%m-%Y %H:%M"
           directory: "./DiscordBot"
           file_name: .env
           
