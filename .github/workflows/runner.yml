@@ -1,0 +1,38 @@
+name: Docker Runner
+
+on:
+  push:
+    branches: [ dev ]
+    paths-ignore:
+      - '**/README.md'
+
+jobs:
+  run:
+    runs-on: self-hosted
+    environment: production
+
+    steps:
+      - name: Checkout dev branch
+        uses: actions/checkout@v4
+        with:
+          clean: false
+
+      - name: Set Powershell Bypass (Windows Only)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: powershell -Command "Set-ExecutionPolicy RemoteSigned -Scope CurrentUser"
+        
+      - name: Make envfile
+        uses: SpicyPizza/create-envfile@v2.0
+        with:
+          envkey_BOT_URL: ${{ secrets.SERVER_URL }}
+          envkey_DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+          directory: "./DiscordBot"
+          file_name: .env
+          
+      - name: Run Container
+        working-directory: ./DiscordBot
+        run: docker compose up -d --build
+
+      - name: Cleanup Unused Images
+        run: docker image prune -f
