@@ -1232,7 +1232,11 @@ def send_message():
                     
                     embed.add_field(name="Top Server Scores", value=top_scores_message, inline=False)
 
-
+                    if(data.get('pack').contains('ITL Online 2025')):
+                        print(f"Pack was ITL Online 2025.")
+                    else:
+                        print(f"Pack was not an ITL pack.")
+                    
                     asyncio.run_coroutine_threadsafe(channel.send(embed=embed, file=file, allowed_mentions=discord.AllowedMentions.none()), client.loop)
                 #else:
                     #print(f"Channel with ID {channel_id} not found in guild {guild.name}")
