@@ -3,6 +3,7 @@ import discord
 from discord.ext import commands
 from discord import Button, app_commands
 from discord.utils import escape_mentions
+import logging
 import sqlite3
 import secrets
 from flask import Flask, request, jsonify
@@ -102,8 +103,8 @@ async def usethischannel(Interaction: discord.Interaction):
         await Interaction.response.send_message(f"An error occurred: {e}")
 
 @usethischannel.error
-async def usethischannel_error(Interaction: discord.Interaction, error: commands.CommandError):
-    if isinstance(error, commands.MissingPermissions):
+async def usethischannel_error(Interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.MissingPermissions):
         await Interaction.response.send_message("You do not have the required permissions to use this command.", ephemeral=True)
     else:
         await Interaction.response.send_message("An error occurred while trying to run this command.", ephemeral=True)
@@ -1233,14 +1234,14 @@ def send_message():
                     embed.add_field(name="Top Server Scores", value=top_scores_message, inline=False)
 
                     try:
-                        if('ITL Online 2025' in data.get('pack')):
-                            print(f"Pack was ITL Online 2025.")
+                        if "ITL Online 2025" in data.get('pack'):
+                            logging.warning(f"Pack was ITL Online 2025. Sending message.")
+                            asyncio.run_coroutine_threadsafe(channel.send(embed=embed, file=file, allowed_mentions=discord.AllowedMentions.none()), client.loop)
                         else:
-                            print(f"Pack was not an ITL pack.")
+                            logging.warning(f"Pack was not an ITL pack.")
                     except Exception as e:
                         print(f"Error occurred, continuing.")
 
-                    asyncio.run_coroutine_threadsafe(channel.send(embed=embed, file=file, allowed_mentions=discord.AllowedMentions.none()), client.loop)
                 #else:
                     #print(f"Channel with ID {channel_id} not found in guild {guild.name}")
 
