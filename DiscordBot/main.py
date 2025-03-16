@@ -34,6 +34,7 @@ client = commands.Bot(command_prefix='!', intents=intents)
 
 database = 'database.db'
 
+logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 
 #================================================================================================
 # Sync commands on bot startup
@@ -1237,11 +1238,22 @@ def send_message():
                     try:
                         if "ITL Online 2025" in data.get('pack'):
                             logging.info(f"Pack was ITL Online 2025. Sending message.")
-                            asyncio.run_coroutine_threadsafe(channel.send(embed=embed, file=file, allowed_mentions=discord.AllowedMentions.none()), client.loop)
+                            message = asyncio.run_coroutine_threadsafe(channel.send(embed=embed, file=file, allowed_mentions=discord.AllowedMentions.none()), client.loop)
+
+                            # Oh this nesting sucks, but it's temporary (for now)
+                            # and we don't care if this fails honestly.
+                            try:
+                                # Pin any quads
+                                if data.get('grade') == "⭐⭐⭐⭐":
+                                    logging.info(f"Score was a quad, pinning.")
+                                    asyncio.run_coroutine_threadsafe(message.result().pin(), client.loop)
+                            except Exception as e:
+                                logging.info(f"Error occurred while pinning quad, continuing.")
+
                         else:
                             logging.info(f"Pack was not an ITL pack.")
                     except Exception as e:
-                        print(f"Error occurred, continuing.")
+                        logging.info(f"Error occurred, continuing.")
 
                 #else:
                     #print(f"Channel with ID {channel_id} not found in guild {guild.name}")
