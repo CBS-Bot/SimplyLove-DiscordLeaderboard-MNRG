@@ -1243,8 +1243,8 @@ def send_message():
                             # Oh this nesting sucks, but it's temporary (for now)
                             # and we don't care if this fails honestly.
                             try:
-                                # Pin any quads
-                                if data.get('grade') == "⭐⭐⭐⭐":
+                                # Pin any quads or quints
+                                if data.get('grade') == "⭐⭐⭐⭐" or data.get('grade') == "⭐⭐⭐⭐⭐":
                                     logging.info(f"Score was a quad, pinning.")
                                     asyncio.run_coroutine_threadsafe(message.result().pin(), client.loop)
                             except Exception as e:
