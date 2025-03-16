@@ -1233,7 +1233,7 @@ def send_message():
                     embed.add_field(name="Top Server Scores", value=top_scores_message, inline=False)
 
                     try:
-                        if(data.get('pack').contains('ITL Online 2025')):
+                        if('ITL Online 2025' in data.get('pack')):
                             print(f"Pack was ITL Online 2025.")
                         else:
                             print(f"Pack was not an ITL pack.")
