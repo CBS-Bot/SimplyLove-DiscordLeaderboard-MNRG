@@ -1041,6 +1041,7 @@ def send_message():
         return jsonify({'status': 'API Key has not been found in database.'}), 403
 
     user_id, submit_disabled = result
+    logging.info(f"Score incoming from user {user_id}, API key {api_key}.")
 
     # Check if the request contains all required data
     required_keys_song = [
@@ -1235,10 +1236,10 @@ def send_message():
 
                     try:
                         if "ITL Online 2025" in data.get('pack'):
-                            logging.warning(f"Pack was ITL Online 2025. Sending message.")
+                            logging.info(f"Pack was ITL Online 2025. Sending message.")
                             asyncio.run_coroutine_threadsafe(channel.send(embed=embed, file=file, allowed_mentions=discord.AllowedMentions.none()), client.loop)
                         else:
-                            logging.warning(f"Pack was not an ITL pack.")
+                            logging.info(f"Pack was not an ITL pack.")
                     except Exception as e:
                         print(f"Error occurred, continuing.")
 
