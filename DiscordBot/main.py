@@ -1239,16 +1239,23 @@ def send_message():
                         if "ITL Online 2025" in data.get('pack'):
                             message = asyncio.run_coroutine_threadsafe(channel.send(embed=embed, file=file, allowed_mentions=discord.AllowedMentions.none()), client.loop)
 
-                            # Oh this nesting sucks, but it's temporary (for now)
-                            # and we don't care if this fails honestly.
-                            try:
-                                # Pin any quads or quints
-                                logging.info(f"Checking grade. Grade: {data.get('grade')}.")
-                                if data.get('grade') == "Grade_Tier01":
-                                    logging.info(f"Score was a quad, pinning.")
-                                    asyncio.run_coroutine_threadsafe(message.result().pin(), client.loop)
-                            except Exception as e:
-                                logging.info(f"Error occurred while pinning quad, continuing.")
+                            # Pin any quads or quints
+                            if data.get('grade') == "Grade_Tier01":
+
+                                # Oh this nesting sucks, but it's temporary (for now)
+                                # and we don't care if this fails honestly.
+                                try:
+                                    res = asyncio.run_coroutine_threadsafe(channel.pins(), client.loop)
+                                    pins = res.result()
+                                    logging.info(f"Number of pins found: {len(pins)}.")
+                                    pins.sort(key=lambda x: x.created_at)
+                                    logging.info(f"Pin found created at: {pins[0].created_at}.")
+                                    # pins[0].unpin() Uncomment later once we know it works
+                                except Exception as e:
+                                    logging.info(f"Error occurred while figuring out what pin to unpin.")
+
+                                asyncio.run_coroutine_threadsafe(message.result().pin(), client.loop)
+
                     except Exception as e:
                         logging.info(f"Error occurred, continuing.")
 
