@@ -1244,13 +1244,16 @@ def send_message():
 
                                 # Oh this nesting sucks, but it's temporary (for now)
                                 # and we don't care if this fails honestly.
+
+                                # Unpin the oldest pin if there's 50 pins
                                 try:
                                     res = asyncio.run_coroutine_threadsafe(channel.pins(), client.loop)
                                     pins = res.result()
                                     logging.info(f"Number of pins found: {len(pins)}.")
                                     pins.sort(key=lambda x: x.created_at)
-                                    logging.info(f"Pin found created at: {pins[0].created_at}.")
-                                    # pins[0].unpin() Uncomment later once we know it works
+                                    if len(pins) == 50:
+                                        logging.info(f"50 pins found. Unpinning message from {pins[0].created_at}.")
+                                        asyncio.run_coroutine_threadsafe(pins[0].unpin(), client.loop)
                                 except Exception as e:
                                     logging.info(f"Error occurred while figuring out what pin to unpin.")
 
