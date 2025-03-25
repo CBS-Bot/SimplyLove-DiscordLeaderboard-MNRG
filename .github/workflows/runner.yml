@@ -2,7 +2,7 @@ name: Docker Runner
 
 on:
   push:
-    branches: [ dev ]
+    branches: [ mnrg ]
     paths-ignore:
       - '**/README.md'
 
