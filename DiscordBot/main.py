@@ -218,8 +218,6 @@ async def score(interaction: discord.Interaction, song: str, isdouble: bool = Fa
         await interaction.response.send_message("This command can only be used in a server.")
         return
     
-
-
     tableType = ''
     if isdouble:
         tableType += 'DOUBLES'
@@ -312,7 +310,7 @@ async def score(interaction: discord.Interaction, song: str, isdouble: bool = Fa
 #================================================================================================
 
 @client.tree.command(name="course", description="Recall course result from database.")
-async def course(interaction: discord.Interaction, song: str, isdouble: bool = False, user: discord.User = None, failed: bool = False, difficulty: int = 0, pack: str = "", private: bool = False):
+async def course(interaction: discord.Interaction, name: str, isdouble: bool = False, user: discord.User = None, failed: bool = False, difficulty: int = 0, pack: str = "", private: bool = False):
     if interaction.guild is None:
         await interaction.response.send_message("This command can only be used in a server.")
         return
@@ -331,9 +329,9 @@ async def course(interaction: discord.Interaction, song: str, isdouble: bool = F
 
     params = []
 
-    if song:
+    if name:
         query += " AND courseName LIKE ?"
-        params.append(f"%{song}%")
+        params.append(f"%{name}%")
     if user:
         query += " AND userID = ?"
         params.append(str(user.id))
@@ -552,7 +550,7 @@ async def compare_logic(interaction: discord.Interaction, page: int, order, priv
 #================================================================================================
 
 @client.tree.command(name="unplayed", description="Returns a list of songs that you have not played.")
-@app_commands.describe(user_two="User to compare (optional)", private="Whether the response should be private", order="The order asc/desc_ex, _alpha, _diff")
+@app_commands.describe(user_two="User to compare (optional)", private="Whether the response should be private", order="The order asc/desc_ex, _alpha")
 async def unplayed(interaction: discord.Interaction, user_two: discord.User = None, isdouble: bool = False, iscourse: bool = False, page: int = 1, order: str = "desc_alpha", private: bool = True, pack: str = "", difficulty: int = 0):
     if interaction.guild is None:
         await interaction.response.send_message("This command can only be used in a server.")
@@ -779,15 +777,15 @@ def init_db():
 
     for table in tablesNormal:
         c.execute(f'''CREATE TABLE IF NOT EXISTS {table}
-                 (userID TEXT, songName TEXT, artist TEXT, pack TEXT, difficulty TEXT,
-                  itgScore TEXT, exScore TEXT, grade TEXT, length TEXT, stepartist TEXT, hash TEXT,
-                  scatter JSON, life JSON, worstWindow TEXT, date TEXT, mods TEXT, description TEXT, prevBestEx TEXT)''')
+                 (userID TEXT, songName TEXT, artist TEXT, pack TEXT, difficulty INTEGER,
+                  itgScore REAL, exScore REAL, grade TEXT, length TEXT, stepartist TEXT, hash TEXT,
+                  scatter JSON, life JSON, worstWindow TEXT, date TEXT, mods TEXT, description TEXT, prevBestEx REAL, radar JSON)''')
     
     for table in tablesCourses:
         c.execute(f'''CREATE TABLE IF NOT EXISTS {table}
-                 (userID TEXT, courseName TEXT, pack TEXT, entries TEXT, scripter TEXT, difficulty TEXT,
-                  description TEXT, itgScore TEXT, exScore TEXT, grade TEXT, hash TEXT,
-                  life JSON, date TEXT, mods TEXT, prevBestEx TEXT)''')
+                 (userID TEXT, courseName TEXT, pack TEXT, entries TEXT, scripter TEXT, difficulty INTEGER,
+                  description TEXT, itgScore REAL, exScore REAL, grade TEXT, hash TEXT,
+                  life JSON, date TEXT, mods TEXT, prevBestEx REAL, radar JSON)''')
 
 
 
@@ -825,15 +823,15 @@ def embedded_score(data, user_id, title="Users Best Score", color=discord.Color.
         embed = discord.Embed(title=title, color=color)
         embed.add_field(name="User", value=f"<@{user_id}>", inline=False)
         embed.add_field(name="Song", value=data.get('songName'), inline=True)
-        embed.add_field(name="Artist", value=data.get('artist'), inline=True)
+        # embed.add_field(name="Artist", value=data.get('artist'), inline=True)
         embed.add_field(name="Pack", value=data.get('pack'), inline=True)
-        embed.add_field(name="Difficulty", value= style + data.get('difficulty'), inline=True)
-        embed.add_field(name="ITG Score", value=f"{data.get('itgScore')}%", inline=True)
+        embed.add_field(name="Difficulty", value= style + str(data.get('difficulty')), inline=True)
+        # embed.add_field(name="ITG Score", value=f"{data.get('itgScore')}%", inline=True)
         upscore = round(float(data.get('exScore')) - float(data.get('prevBestEx')), 2)
         embed.add_field(name="EX Score", value=f"{data.get('exScore')}% (+ {upscore}%)", inline=True)
         embed.add_field(name="Grade", value=mapped_grade, inline=True)
         embed.add_field(name="Length", value=data.get('length'), inline=True)
-        embed.add_field(name="Stepartist", value=data.get('stepartist'), inline=True)
+        # embed.add_field(name="Stepartist", value=data.get('stepartist'), inline=True)
         embed.add_field(name="Date played", value=data.get('date'), inline=True)
         embed.add_field(name="Mods", value=data.get('mods'), inline=True)
 
@@ -887,7 +885,7 @@ def embedded_breakdown(data, user_id, title="Score Breakdown", color=discord.Col
 
     grade = data.get('grade')
     mapped_grade = grade_mapping.get(grade, grade)
-    embed = discord.Embed(title=title, color=color)
+    embed = discord.Embed(title=f"{title}", color=color)
     embed.add_field(name="User", value=f"<@{user_id}>", inline=False)
     embed.add_field(name="Song", value=data.get('songName'), inline=True)
     embed.add_field(name="Pack", value=data.get('pack'), inline=True)
@@ -951,6 +949,14 @@ def embedded_breakdown(data, user_id, title="Score Breakdown", color=discord.Col
                     WO:  {judgements['e_wo']+judgements['l_wo']} ({judgements['e_wo']}/{judgements['l_wo']})
                     Miss: {judgements['miss']}""", inline=True)
 
+    radar = data.get('radar')
+    if radar:
+        embed.add_field(name="Holds/Rolls/Mines", value=f"""
+                        Holds: {radar.get('Holds')[0]}/{radar.get('Holds')[1]}
+                        Rolls: {radar.get('Rolls')[0]}/{radar.get('Rolls')[1]}
+                        Mines: {radar.get('Mines')[0]}/{radar.get('Mines')[1]}""", inline=True)
+    else:
+        embed.add_field(name="Holds/Rolls/Mines", value="No radar data available", inline=True)
 
     y_values = np.array([100 - point['y'] for point in data.get('scatterplotData') if point['y'] not in [0, 200]])
     
@@ -1026,8 +1032,6 @@ def send_message():
     data = request.json
     api_key = data.get('api_key')
 
-    #print(data)
-
     # Check if the request contains an API key
     if not api_key:
         return jsonify({'status': 'Request is missing API Key.'}), 402
@@ -1048,15 +1052,14 @@ def send_message():
     required_keys_song = [
         'songName', 'artist', 'pack', 'length', 'stepartist', 'difficulty', 'description',
         'itgScore', 'exScore', 'grade', 'hash', 'scatterplotData', 'lifebarInfo',
-        'worstWindow', 'style', 'modifiers'
+        'worstWindow', 'style', 'mods', 'radar'
     ]
     required_keys_course = [
         'courseName', 'pack', 'entries', 'hash', 'scripter', 'itgScore', 'description',
-        'exScore', 'grade', 'lifebarInfo', 'style', 'modifiers', 'difficulty'
+        'exScore', 'grade', 'lifebarInfo', 'style', 'mods', 'difficulty', 'radar'
     ]
 
     if not (all(key in data for key in required_keys_song) or all(key in data for key in required_keys_course)):
-        #print("Request is missing required data.")
         
         user = client.get_user(int(user_id))
 
@@ -1094,27 +1097,25 @@ def send_message():
     # Compare the ex score
     existing_ex_score = float(existing_entry[0]) if existing_entry else 0
     new_ex_score = float(data.get('exScore'))
-
-
-
     
     if existing_entry and new_ex_score > existing_ex_score:
         if data.get('courseName'):
-            updateExisting = 'UPDATE ' + tableType + ' SET itgScore = ?, exScore = ?, grade = ?, life = ?, date = ?, mods = ?, prevBestEx = ? WHERE hash = ? AND userID = ?'
+            updateExisting = 'UPDATE ' + tableType + ' SET itgScore = ?, exScore = ?, grade = ?, life = ?, date = ?, mods = ?, prevBestEx = ?, radar = ? WHERE hash = ? AND userID = ?'
             c.execute(updateExisting,
                       (data.get('itgScore'), 
                        new_ex_score,
                        data.get('grade'), 
                        str(data.get('lifebarInfo')), 
                        datetime.now().strftime(os.getenv('DATE_FORMAT')),
-                       data.get('modifiers'),
+                       data.get('mods'),
                        existing_ex_score,
+                       str(data.get('radar')),
                        data.get('hash'),
                        user_id))
             conn.commit()
 
         else:
-            updateExisting = 'UPDATE ' + tableType + ' SET itgScore = ?, exScore = ?, grade = ?, scatter = ?, life = ?, worstWindow = ?, date = ?, mods = ?, length = ?, prevBestEx = ? WHERE hash = ? AND userID = ?'
+            updateExisting = 'UPDATE ' + tableType + ' SET itgScore = ?, exScore = ?, grade = ?, scatter = ?, life = ?, worstWindow = ?, date = ?, mods = ?, length = ?, prevBestEx = ?, radar = ? WHERE hash = ? AND userID = ?'
             c.execute(updateExisting, 
                       (data.get('itgScore'), 
                        new_ex_score,
@@ -1123,9 +1124,10 @@ def send_message():
                        str(data.get('lifebarInfo')), 
                        data.get('worstWindow'), 
                        datetime.now().strftime(os.getenv('DATE_FORMAT')),
-                       data.get('modifiers'),
+                       data.get('mods'),
                        data.get('length'), # I was sending the wrong value lmao
                        existing_ex_score,
+                       str(data.get('radar')),
                        data.get('hash'),
                        user_id))
             conn.commit()
@@ -1133,7 +1135,7 @@ def send_message():
 
     elif new_ex_score > existing_ex_score:
         if data.get('courseName'):
-            insertNew = 'INSERT INTO ' + tableType + ' (userID, courseName, pack, entries, scripter, itgScore, exScore, grade, hash, life, date, mods, difficulty, description, prevBestEx) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            insertNew = 'INSERT INTO ' + tableType + ' (userID, courseName, pack, entries, scripter, itgScore, exScore, grade, hash, life, date, mods, difficulty, description, prevBestEx, radar) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             c.execute(insertNew,
                       (user_id, 
                        data.get('courseName'), 
@@ -1146,14 +1148,16 @@ def send_message():
                        data.get('hash'), 
                        str(data.get('lifebarInfo')), 
                        datetime.now().strftime(os.getenv('DATE_FORMAT')),
-                       data.get('modifiers'),
+                       data.get('mods'),
                        data.get('difficulty'),
                        data.get('description'),
-                       '0'))
+                       '0',
+                       str(data.get('radar'))
+                       ))
                        
             conn.commit()
         else:
-            insertNew = 'INSERT INTO ' + tableType + ' (userID, songName, artist, pack, difficulty, itgScore, exScore, grade, length, stepartist, hash, scatter, life, worstWindow, date, mods, description, prevBestEx) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            insertNew = 'INSERT INTO ' + tableType + ' (userID, songName, artist, pack, difficulty, itgScore, exScore, grade, length, stepartist, hash, scatter, life, worstWindow, date, mods, description, prevBestEx, radar) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             c.execute(insertNew,
                       (user_id, 
                        data.get('songName'), 
@@ -1170,13 +1174,15 @@ def send_message():
                        str(data.get('lifebarInfo')), 
                        data.get('worstWindow'), 
                        datetime.now().strftime(os.getenv('DATE_FORMAT')),
-                       data.get('modifiers'),
+                       data.get('mods'),
                        data.get('description'),
-                       '0'))
+                       '0',
+                       str(data.get('radar'))
+                       ))
+            
             conn.commit()
     else:
         isPB = False
-
 
     # Check if submit_disabled is a date and time and if it is past that time and date
     if submit_disabled != 'enabled' and submit_disabled != 'disabled':
@@ -1193,43 +1199,49 @@ def send_message():
 
     if isPB and submit_disabled == 'enabled':
 
+        data['date'] = datetime.now().strftime(os.getenv('DATE_FORMAT'))
+        data['prevBestEx'] = existing_ex_score
+        if data.get('courseName'):
+            color = discord.Color.purple()
+        elif data.get('style') == 'double':
+            color = discord.Color.blue()
+        else:
+            color = discord.Color.green()
+        
+        embed, file = embedded_score(data, user_id, "New (Server) Personal Best!", color)
 
+        conn = sqlite3.connect(database)
+        c = conn.cursor()
+        
+        channel_results = []
         for guild in client.guilds:
-            #print("Guilds: ", guild.name)
+            if guild.get_member(int(user_id)):
 
-            c.execute('SELECT channelID FROM CHANNELS WHERE serverID = ?', (str(guild.id),))
-            channel_results = c.fetchall()
+                c.execute('SELECT channelID FROM CHANNELS WHERE serverID = ?', (str(guild.id),))
+                channel_results.extend([channel[0] for channel in c.fetchall()])
 
-            for channel_result in channel_results:
-                channel_id = int(channel_result[0])
-                channel = client.get_channel(channel_id)
-                if channel:
-                    #print(f"Sending message to channel: {channel.name} (ID: {channel_id}) in guild: {guild.name}")
-                    
-                    data['date'] = datetime.now().strftime(os.getenv('DATE_FORMAT'))
-                    data['prevBestEx'] = existing_ex_score
-                    
-                    if data.get('courseName'):
-                        color = discord.Color.purple()
-                    elif data.get('style') == 'double':
-                        color = discord.Color.blue()
-                    else:
-                        color = discord.Color.green()
+        getTopScores = f'SELECT userID, exScore FROM {tableType} WHERE hash = ? ORDER BY exScore DESC'
+        c.execute(getTopScores, (data.get('hash'),))
+        top_scores = c.fetchall()
+        
+        embed.add_field(name="Top Server Scores", value="", inline=False)
+        for channel_id in channel_results:
+            channel = client.get_channel(int(channel_id))
 
-                    embed, file = embedded_score(data, user_id, "New (Server) Personal Best!", color)
-                    #embed.set_image(url="attachment://scatterplot.png")
-                    
-                    toPost = 'SELECT userID, exScore FROM ' + tableType + ' WHERE hash = ? AND userID IN (SELECT userID FROM ' + tableType + ' WHERE hash = ?) ORDER BY exScore DESC LIMIT 3'
-                    c.execute(toPost, (data.get('hash'), data.get('hash')))
-                    top_scores = c.fetchall()
+            # Filter the top scores to include only members of the current guild
+            top_selected_scores = [(uid, ex_score) for uid, ex_score in top_scores if channel.guild.get_member(int(uid))][:3]
 
-                    # Filter the top scores to include only members of the current guild
-                    top_scores = [(uid, ex_score) for uid, ex_score in top_scores if guild.get_member(int(uid))]
+            # Format the top 3 scores
+            top_scores_message = ""
+            for idx, (uid, ex_score) in enumerate(top_selected_scores, start=1):
+                top_scores_message += f"{idx}. <@!{uid}>, EX Score: {ex_score}%\n"
+            
+            embed.set_field_at(index=-1, name="Top Server Scores", value=top_scores_message, inline=False)
 
-                    # Format the top 3 scores
-                    top_scores_message = ""
-                    for idx, (uid, ex_score) in enumerate(top_scores, start=1):
-                        top_scores_message += f"{idx}. <@!{uid}>, EX Score: {ex_score}%\n"
+            asyncio.run_coroutine_threadsafe(
+                channel.send(embed=embed, file=discord.File('scatterplot.png', filename='scatterplot.png'), allowed_mentions=discord.AllowedMentions.none()),
+                client.loop
+            )
 
 
                     
@@ -1268,7 +1280,6 @@ def send_message():
 
     conn.close()
     return jsonify({'status': 'success'}), 200
-
 
 #================================================================================================
 # Run Flask, run Discord bot

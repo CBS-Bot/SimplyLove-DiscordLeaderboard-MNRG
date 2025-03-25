@@ -240,6 +240,92 @@ end
 
 --------------------------------------------------------------------------------------------------
 
+-- Im only interested in what affects EX score, which should be just Holds, Rolls and Mines
+-- Hands I guess are a separate thing, but might as well include them lol
+-- Not interested in other Tech notation (at least for now lol)
+local function getRadar(player)
+
+    local pss = STATSMAN:GetCurStageStats():GetPlayerStageStats(player)
+    local RadarCategories = { 'Hands', 'Holds', 'Mines', 'Rolls' }
+    
+    local radarValues = {}
+
+    for i, RCType in ipairs(RadarCategories) do
+        radarValues[RCType] = {}
+        radarValues[RCType][1] = pss:GetRadarActual():GetValue( "RadarCategory_"..RCType )
+        radarValues[RCType][2] = pss:GetRadarPossible():GetValue( "RadarCategory_"..RCType )
+        radarValues[RCType][2] = clamp(radarValues[RCType][2], 0, 999)
+    end
+
+    return radarValues
+end
+
+--------------------------------------------------------------------------------------------------
+
+local function comment(player)
+    local pn = ToEnumShortString(player)
+    
+    local comment = ""
+	
+    
+	local cmod = GAMESTATE:GetPlayerState(pn):GetPlayerOptions("ModsLevel_Preferred"):CMod()
+    local mmod = GAMESTATE:GetPlayerState(pn):GetPlayerOptions("ModsLevel_Preferred"):MMod()
+    local xmod = GAMESTATE:GetPlayerState(pn):GetPlayerOptions("ModsLevel_Preferred"):XMod()
+    if xmod ~= nil then
+        xmod = ("%.2f"):format(xmod)
+    end
+
+    if cmod ~= nil then
+		comment = comment.."C"..tostring(cmod)
+    elseif mmod ~= nil then
+        comment = comment.."M"..tostring(mmod)
+    elseif xmod ~= nil then
+        comment = comment.."X"..tostring(xmod)
+    end
+
+    local mini = GAMESTATE:GetPlayerState(pn):GetPlayerOptions("ModsLevel_Preferred"):Mini()
+    if mini ~= nil then comment = comment..", ".. (100*mini) .. "%Mini" end
+    
+    local visualDelay = math.floor(1000 * GAMESTATE:GetPlayerState(pn):GetPlayerOptions("ModsLevel_Preferred"):VisualDelay() + 0.5)
+    if visualDelay ~= nil then comment = comment..", "..visualDelay.."ms (Vis.Del)" end
+
+    local mirror = GAMESTATE:GetPlayerState(pn):GetPlayerOptions("ModsLevel_Preferred"):Mirror()
+    local left = GAMESTATE:GetPlayerState(pn):GetPlayerOptions("ModsLevel_Preferred"):Left()
+    local right = GAMESTATE:GetPlayerState(pn):GetPlayerOptions("ModsLevel_Preferred"):Right()
+    local shuffle = GAMESTATE:GetPlayerState(pn):GetPlayerOptions("ModsLevel_Preferred"):Shuffle()
+    --local turnnone = GAMESTATE:GetPlayerState(pn):GetPlayerOptions("ModsLevel_Preferred"):TurnNone() -- This also doens't seem to work lol
+    -- These do not seem to exist in ITGMania
+    -- local blender = GAMESTATE:GetPlayerState(pn):GetPlayerOptions("ModsLevel_Preferred"):Blender()
+    -- local LRMirror = GAMESTATE:GetPlayerState(pn):GetPlayerOptions("ModsLevel_Preferred"):LRMirror()
+    -- local UDMirror = GAMESTATE:GetPlayerState(pn):GetPlayerOptions("ModsLevel_Preferred"):UDMirror()
+    
+    if mirror then
+        comment = comment..", Mirror"
+    elseif left then
+        comment = comment..", Left"
+    elseif right then
+        comment = comment..", Right"
+    elseif shuffle then
+        comment = comment..", Shuffle"
+    -- elseif turnnone then
+    --     comment = comment
+    -- else
+    --     comment = comment..", ???Turn"
+    end
+    -- elseif blender then
+    --     comment = comment..", Blender"
+    -- elseif LRMirror then
+    --     comment = comment..", LRMirror"
+    -- elseif UDMirror then
+    --     comment = comment..", UDMirror"
+
+    --SCREENMAN:SystemMessage(tostring(turnnone) .. " " .. comment)
+
+    return comment
+end
+
+--------------------------------------------------------------------------------------------------
+
 local function SongResultData(player, apiKey, style)
     
     local pn = ToEnumShortString(player)
@@ -256,7 +342,7 @@ local function SongResultData(player, apiKey, style)
         difficulty = GAMESTATE:GetCurrentSteps(player):GetMeter(),
         description = escapeString(GAMESTATE:GetCurrentSteps(player):GetDescription()),
         hash = tostring(SL[pn].Streams.Hash),
-        modifiers = CreateCommentString(player)
+        modifiers = comment(player)
     }
 
     -- Result Data
@@ -265,6 +351,7 @@ local function SongResultData(player, apiKey, style)
         score = FormatPercentScore(STATSMAN:GetCurStageStats():GetPlayerStageStats(player):GetPercentDancePoints()):gsub("%%", ""),
         exscore = ("%.2f"):format(CalculateExScore(player)),
         grade = STATSMAN:GetCurStageStats():GetPlayerStageStats(player):GetGrade(),
+        radar = getRadar(player),
     }
 
 
@@ -277,7 +364,7 @@ local function SongResultData(player, apiKey, style)
 
     -- Prepare JSON data
     local jsonData = string.format(
-        '{"api_key": "%s","songName": "%s","artist": "%s","pack": "%s","length": "%s","stepartist": "%s","difficulty": "%s", "description": "%s", "itgScore": "%s","exScore": "%s","grade": "%s", "hash": "%s", "scatterplotData": %s, "lifebarInfo": %s, "worstWindow": %s, "style": "%s", "modifiers": "%s"}',
+        '{"api_key": "%s","songName": "%s","artist": "%s","pack": "%s","length": "%s","stepartist": "%s","difficulty": "%s", "description": "%s", "itgScore": "%s","exScore": "%s","grade": "%s", "hash": "%s", "scatterplotData": %s, "lifebarInfo": %s, "worstWindow": %s, "style": "%s", "mods": "%s", "radar": %s}',
         apiKey,
         songInfo.name,
         songInfo.artist,
@@ -294,10 +381,9 @@ local function SongResultData(player, apiKey, style)
         lifebarInfoJson,
         ("%.4f"):format(worst_window),
         style,
-        songInfo.modifiers
-        )
-        
-    --debugPrint("JSON Data: "..jsonData)    
+        songInfo.modifiers,
+        encode(resultInfo.radar)
+        )  
 
     return jsonData
 
@@ -315,7 +401,7 @@ local function CourseResultData(player, apiKey, style)
     local course = GAMESTATE:GetCurrentCourse()
     local trail = GAMESTATE:GetCurrentTrail(player)
 
-    SCREENMAN:SystemMessage(trail:GetMeter())
+    
 
     -- Course Data
     local courseInfo = {
@@ -326,7 +412,7 @@ local function CourseResultData(player, apiKey, style)
         entries = "[",
         hash = BinaryToHex(CRYPTMAN:SHA1File(course:GetCourseDir())):sub(1, 16),
         scripter = escapeString(course:GetScripter()),
-        modifiers = CreateCommentString(player)
+        modifiers = comment(player)
     }
 
 
@@ -347,6 +433,7 @@ local function CourseResultData(player, apiKey, style)
         score = FormatPercentScore(STATSMAN:GetCurStageStats():GetPlayerStageStats(player):GetPercentDancePoints()):gsub("%%", ""),
         exscore = ("%.2f"):format(CalculateExScore(player)),
         grade = STATSMAN:GetCurStageStats():GetPlayerStageStats(player):GetGrade(),
+        radar = getRadar(player),
     }
 
     
@@ -356,7 +443,7 @@ local function CourseResultData(player, apiKey, style)
 
     -- Prepare JSON data
     local jsonData = string.format(
-        '{"api_key": "%s", "courseName": "%s", "pack": "%s", "entries": "%s", "hash": "%s", "scripter": "%s", "difficulty": "%s", "description": "%s", "itgScore": "%s", "exScore": "%s", "grade": "%s", "lifebarInfo": %s, "style": "%s", "modifiers": "%s"}',
+        '{"api_key": "%s", "courseName": "%s", "pack": "%s", "entries": "%s", "hash": "%s", "scripter": "%s", "difficulty": "%s", "description": "%s", "itgScore": "%s", "exScore": "%s", "grade": "%s", "lifebarInfo": %s, "style": "%s", "mods": "%s", "radar": %s}',
         apiKey,
         courseInfo.name,
         courseInfo.pack,
@@ -370,13 +457,9 @@ local function CourseResultData(player, apiKey, style)
         resultInfo.grade,
         lifebarInfoJson,
         style,
-        courseInfo.modifiers
+        courseInfo.modifiers,
+        encode(resultInfo.radar)
         )
-
-
-
-        
---     --debugPrint("JSON Data: "..jsonData)    
 
     return jsonData
 
@@ -390,10 +473,11 @@ local u = {}
 u["ScreenEvaluationStage"] = Def.Actor {
     ModuleCommand = function(self)
 
+        
         -- single, versus, double
         local style = GAMESTATE:GetCurrentStyle():GetName()
         if style == "versus" then style = "single" end
-
+        
         for player in ivalues(GAMESTATE:GetHumanPlayers()) do
             local partValid, allValid = ValidForGrooveStats(player)
             local botURL, apiKey = readURLandKey(player)
