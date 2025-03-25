@@ -1238,44 +1238,38 @@ def send_message():
             
             embed.set_field_at(index=-1, name="Top Server Scores", value=top_scores_message, inline=False)
 
-            asyncio.run_coroutine_threadsafe(
-                channel.send(embed=embed, file=discord.File('scatterplot.png', filename='scatterplot.png'), allowed_mentions=discord.AllowedMentions.none()),
-                client.loop
-            )
+            try:
+                if "ITL Online 2025" in data.get('pack'):
+                    message = asyncio.run_coroutine_threadsafe(
+                        channel.send(embed=embed, file=discord.File('scatterplot.png', filename='scatterplot.png'), allowed_mentions=discord.AllowedMentions.none()),
+                        client.loop
+                    )
 
+                    # Pin any quads or quints
+                    if data.get('grade') == "Grade_Tier01":
 
-                    
-                    embed.add_field(name="Top Server Scores", value=top_scores_message, inline=False)
+                        # Oh this nesting sucks, but it's temporary (for now)
+                        # and we don't care if this fails honestly.
 
-                    try:
-                        if "ITL Online 2025" in data.get('pack'):
-                            message = asyncio.run_coroutine_threadsafe(channel.send(embed=embed, file=file, allowed_mentions=discord.AllowedMentions.none()), client.loop)
+                        # Unpin the oldest pin if there's 50 pins
+                        try:
+                            res = asyncio.run_coroutine_threadsafe(channel.pins(), client.loop)
+                            pins = res.result()
+                            logging.info(f"Number of pins found: {len(pins)}.")
+                            pins.sort(key=lambda x: x.created_at)
+                            if len(pins) == 50:
+                                logging.info(f"50 pins found. Unpinning message from {pins[0].created_at}.")
+                                asyncio.run_coroutine_threadsafe(pins[0].unpin(), client.loop)
+                        except Exception as e:
+                            logging.info(f"Error occurred while figuring out what pin to unpin.")
 
-                            # Pin any quads or quints
-                            if data.get('grade') == "Grade_Tier01":
+                        asyncio.run_coroutine_threadsafe(message.result().pin(), client.loop)
 
-                                # Oh this nesting sucks, but it's temporary (for now)
-                                # and we don't care if this fails honestly.
+            except Exception as e:
+                logging.info(f"Error occurred, continuing.")
 
-                                # Unpin the oldest pin if there's 50 pins
-                                try:
-                                    res = asyncio.run_coroutine_threadsafe(channel.pins(), client.loop)
-                                    pins = res.result()
-                                    logging.info(f"Number of pins found: {len(pins)}.")
-                                    pins.sort(key=lambda x: x.created_at)
-                                    if len(pins) == 50:
-                                        logging.info(f"50 pins found. Unpinning message from {pins[0].created_at}.")
-                                        asyncio.run_coroutine_threadsafe(pins[0].unpin(), client.loop)
-                                except Exception as e:
-                                    logging.info(f"Error occurred while figuring out what pin to unpin.")
-
-                                asyncio.run_coroutine_threadsafe(message.result().pin(), client.loop)
-
-                    except Exception as e:
-                        logging.info(f"Error occurred, continuing.")
-
-                #else:
-                    #print(f"Channel with ID {channel_id} not found in guild {guild.name}")
+        #else:
+            #print(f"Channel with ID {channel_id} not found in guild {guild.name}")
 
 
     conn.close()
