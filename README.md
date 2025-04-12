@@ -1,6 +1,6 @@
 # SimplyLove-DiscordLeaderboard
 
-This repository is made of two parts "the Result Scraper" and "Discord Bot" 
+This repository is made of two parts "the Result Scraper" and "Discord Bot"
 
 
 ## Result Scraper
