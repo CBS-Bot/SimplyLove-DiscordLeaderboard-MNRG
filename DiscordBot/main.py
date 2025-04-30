@@ -11,6 +11,7 @@ import threading
 import asyncio
 import numpy as np
 import os
+import time
 from dotenv import load_dotenv
 
 from library import *
@@ -1254,6 +1255,7 @@ def send_message():
                                     if len(pins) == 50:
                                         logging.info(f"50 pins found. Unpinning message from {pins[0].created_at}.")
                                         asyncio.run_coroutine_threadsafe(pins[0].unpin(), client.loop)
+                                        time.sleep(3)
                                 except Exception as e:
                                     logging.info(f"Error occurred while figuring out what pin to unpin.")
 
