@@ -1,7 +1,9 @@
 **/.env
-**/ResultScraper.zip
+**/users.db
 **/DiscordLeaderboard.ini
 **/database.db
 **/scatterplot.png
 **/distribution.png
 .idea/
+**/*.zip
+**/__pycache__/

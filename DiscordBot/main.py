@@ -1,9 +1,9 @@
 from datetime import datetime, timedelta
 import discord
 from discord.ext import commands
-from discord import Button, app_commands
+from discord import app_commands
 from discord.utils import escape_mentions
-import logging
+from discord.ui import Button, View
 import sqlite3
 import secrets
 from flask import Flask, request, jsonify
@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 
 from library import *
 from plot import *
+import json
 
 load_dotenv()
 
@@ -33,7 +34,9 @@ intents.members = True  # Enable the members intent
 intents.message_content = True  # Enable the message content intent
 client = commands.Bot(command_prefix='!', intents=intents)
 
-database = 'database.db'
+db_folder = os.path.join(os.path.dirname(__file__), 'dbdata')
+os.makedirs(db_folder, exist_ok=True)
+database = os.path.join(db_folder, 'database.db')
 
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 
@@ -110,6 +113,157 @@ async def usethischannel_error(Interaction: discord.Interaction, error: app_comm
         await Interaction.response.send_message("You do not have the required permissions to use this command.", ephemeral=True)
     else:
         await Interaction.response.send_message("An error occurred while trying to run this command.", ephemeral=True)
+
+#================================================================================================
+# ADMIN COMMAND: Delete score - EXPERIMENTAL
+#================================================================================================
+
+@client.tree.command(name="deletescore", description="Delete a score from the database. (Admin only)")
+@app_commands.checks.has_permissions(administrator=True)
+async def deletescore(Interaction: discord.Interaction, song: str, isdouble: bool = False, ispump: bool = False, iscourse: bool = False, user: discord.User = None, failed: bool = False, difficulty: int = 0, pack: str = "", private: bool = False):
+    if Interaction.guild is None:
+        await Interaction.response.send_message("This command can only be used in a server.")
+        return
+
+    tableType = ''
+    if iscourse:
+        tableType = 'COURSES'
+    if isdouble:
+        tableType += 'DOUBLES'
+    else:
+        tableType += 'SINGLES'
+    if ispump:
+        tableType += '_PUMP'
+
+    query = 'SELECT * FROM ' + tableType + ' WHERE 1=1'
+
+    params = []
+
+    # Use correct column name for song/course
+    name_column = "courseName" if iscourse else "songName"
+    if song:
+        query += f" AND {name_column} LIKE ?"
+        params.append(f"%{song}%")
+    if user:
+        query += " AND userID = ?"
+        params.append(str(user.id))
+    if user is None:
+        query += " AND userID = ?"
+        params.append(str(Interaction.user.id))
+        user = Interaction.user
+    if difficulty:
+        query += " AND difficulty = ?"
+        params.append(str(difficulty))
+    if pack:
+        query += " AND pack LIKE ?"
+    conn = sqlite3.connect(database)
+    c = conn.cursor()
+    c.execute(query, params)
+    results = c.fetchall()
+    conn.close()
+
+    if not results:
+        await Interaction.response.send_message("No scores found matching the criteria.", ephemeral=True)
+        return
+
+    if len(results) > 1:
+        # Prepare select options using correct columns for course/song
+        options = []
+        for index, row in enumerate(results):
+            if iscourse:
+                label = f"{row[1]} - {row[4]} [{row[5]}]"
+                description = f" EX Score: {row[8]}%, Pack: {row[2]}"
+            else:
+                label = f"{row[1]} - {row[2]} [{row[4]}]"
+                description = f" EX Score: {row[6]}%, Pack: {row[3]}"
+            options.append(discord.SelectOption(label=label, description=description, value=str(index)))
+
+        class DeleteScoreSelect(discord.ui.Select):
+            def __init__(self):
+                super().__init__(placeholder="Choose a score to delete...", options=options)
+
+            async def callback(self, interaction: discord.Interaction):
+                selected_index = int(self.values[0])
+                selected_row = results[selected_index]
+                if iscourse:
+                    data = extract_course_data_from_row(selected_row)
+                else:
+                    data = extract_data_from_row(selected_row)
+                hash_index = 10
+
+                embed, file = embedded_score(data, str(user.id), "Selected Score to Delete", discord.Color.red())
+                class ConfirmDeleteButton(discord.ui.Button):
+                    def __init__(self):
+                        super().__init__(label="Delete", style=discord.ButtonStyle.danger)
+
+                    
+                    async def callback(self, button_interaction: discord.Interaction):
+                        # Actually delete the selected score
+                        conn = sqlite3.connect(database)
+                        c = conn.cursor()
+                        c.execute(f"DELETE FROM {tableType} WHERE hash = ? AND userID = ?", (selected_row[hash_index], str(user.id)))
+                        deleted_rows = c.rowcount
+                        conn.commit()
+                        conn.close()
+                        if deleted_rows > 0:
+                            await button_interaction.response.send_message(f"Successfully deleted the selected score.", ephemeral=True)
+                        else:
+                            await button_interaction.response.send_message("Failed to delete the score.", ephemeral=True)
+
+                class DoNothingButton(discord.ui.Button):
+                    def __init__(self):
+                        super().__init__(label="Do Nothing", style=discord.ButtonStyle.secondary)
+
+                    async def callback(self, button_interaction: discord.Interaction):
+                        await button_interaction.response.send_message("No action taken.", ephemeral=True)
+
+                view = discord.ui.View()
+                view.add_item(ConfirmDeleteButton())
+                view.add_item(DoNothingButton())
+
+                await interaction.response.send_message(content=None, embed=embed, file=file, ephemeral=True, view=view)
+
+        view = discord.ui.View()
+        view.add_item(DeleteScoreSelect())
+        await Interaction.response.send_message("Multiple scores found. Please select one to delete:", view=view, ephemeral=True)
+    else:
+        selected_row = results[0]
+        if iscourse:
+            data = extract_course_data_from_row(selected_row)
+            hash_index = 10
+        else:
+            data = extract_data_from_row(selected_row)
+            hash_index = 10
+        embed, file = embedded_score(data, str(user.id), "Selected Score to Delete", discord.Color.red())
+
+        class ConfirmDeleteButton(discord.ui.Button):
+            def __init__(self):
+                super().__init__(label="Delete", style=discord.ButtonStyle.danger)
+
+            async def callback(self, button_interaction: discord.Interaction):
+                conn = sqlite3.connect(database)
+                c = conn.cursor()
+                c.execute(f"DELETE FROM {tableType} WHERE hash = ? AND userID = ?", (selected_row[hash_index], str(user.id)))
+                deleted_rows = c.rowcount
+                conn.commit()
+                conn.close()
+                if deleted_rows > 0:
+                    await button_interaction.response.send_message(f"Successfully deleted the selected score.", ephemeral=True)
+                else:
+                    await button_interaction.response.send_message("Failed to delete the score.", ephemeral=True)
+
+        class DoNothingButton(discord.ui.Button):
+            def __init__(self):
+                super().__init__(label="Do Nothing", style=discord.ButtonStyle.secondary)
+
+            async def callback(self, button_interaction: discord.Interaction):
+                await button_interaction.response.send_message("No action taken.", ephemeral=True)
+
+        view = discord.ui.View()
+        view.add_item(ConfirmDeleteButton())
+        view.add_item(DoNothingButton())
+
+        await Interaction.response.send_message(content=None, embed=embed, file=file, ephemeral=True, view=view)
 
 
 #================================================================================================
@@ -214,13 +368,11 @@ async def enable(interaction: discord.Interaction):
 #================================================================================================
 
 @client.tree.command(name="score", description="Recall score result from database.")
-async def score(interaction: discord.Interaction, song: str, isdouble: bool = False, user: discord.User = None, failed: bool = False, difficulty: int = 0, pack: str = "", private: bool = False):
+async def score(interaction: discord.Interaction, song: str, isdouble: bool = False, ispump: bool = False, user: discord.User = None, failed: bool = False, difficulty: int = 0, pack: str = "", private: bool = False):
     if interaction.guild is None:
         await interaction.response.send_message("This command can only be used in a server.")
         return
     
-
-
     tableType = ''
     if isdouble:
         tableType += 'DOUBLES'
@@ -228,6 +380,8 @@ async def score(interaction: discord.Interaction, song: str, isdouble: bool = Fa
         tableType += 'SINGLES'
     if failed:
         tableType += 'FAILS'
+    if ispump:
+        tableType += '_PUMP'
     
     query = 'SELECT * FROM ' + tableType + ' WHERE 1=1'
 
@@ -281,20 +435,21 @@ async def score(interaction: discord.Interaction, song: str, isdouble: bool = Fa
 
                 if isdouble:
                     data['style'] = 'double'
+                data['gameMode'] = 'pump' if ispump else 'itg'
 
-                #print(data)
                 embed, file = embedded_score(data, str(user.id), "Selected Score", discord.Color.red() if failed else discord.Color.dark_grey())
                 top_scores_message = get_top_scores(selected_row, interaction, 3, tableType)
                 embed.add_field(name="Top Server Scores", value=top_scores_message, inline=False)
-                
-                #TODO: It worked without deleting the message, at least for a little while :(
-                #Need to figure something out lol
-                await interaction.message.delete()
-                await interaction.response.send_message(content=None, embed=embed, file=file, ephemeral=private)
+
+                # Add the breakdown button
+                view = View()
+                view.add_item(BreakdownButton(interaction, data['songName'], user, isdouble, ispump, failed, difficulty, pack, private))
+
+                await interaction.response.send_message(content=None, embed=embed, file=file, ephemeral=private, view=view)
 
         view = discord.ui.View()
         view.add_item(ScoreSelect())
-        await interaction.response.send_message("Multiple scores found. Please select one:", view=view, ephemeral=private)
+        await interaction.response.send_message("Multiple scores found. Please select one:", view=view, ephemeral=True)
     else:
         selected_row = results[0]
         data = extract_data_from_row(selected_row)
@@ -306,14 +461,18 @@ async def score(interaction: discord.Interaction, song: str, isdouble: bool = Fa
         top_scores_message = get_top_scores(selected_row, interaction, 3, tableType)
         embed.add_field(name="Top Server Scores", value=top_scores_message, inline=False)
 
-        await interaction.response.send_message(content=None, embed=embed, file=file, ephemeral=private)
+        # Add the breakdown button
+        view = View()
+        view.add_item(BreakdownButton(interaction, data['songName'], user, isdouble, ispump, failed, difficulty, pack, private))
+
+        await interaction.response.send_message(content=None, embed=embed, file=file, ephemeral=private, view=view)
 
 #================================================================================================
 # Recall course result
 #================================================================================================
 
 @client.tree.command(name="course", description="Recall course result from database.")
-async def course(interaction: discord.Interaction, song: str, isdouble: bool = False, user: discord.User = None, failed: bool = False, difficulty: int = 0, pack: str = "", private: bool = False):
+async def course(interaction: discord.Interaction, name: str, isdouble: bool = False, user: discord.User = None, failed: bool = False, difficulty: int = 0, pack: str = "", private: bool = False):
     if interaction.guild is None:
         await interaction.response.send_message("This command can only be used in a server.")
         return
@@ -332,9 +491,9 @@ async def course(interaction: discord.Interaction, song: str, isdouble: bool = F
 
     params = []
 
-    if song:
+    if name:
         query += " AND courseName LIKE ?"
-        params.append(f"%{song}%")
+        params.append(f"%{name}%")
     if user:
         query += " AND userID = ?"
         params.append(str(user.id))
@@ -386,14 +545,11 @@ async def course(interaction: discord.Interaction, song: str, isdouble: bool = F
                 top_scores_message = get_top_scores(selected_row, interaction, 3, tableType)
                 embed.add_field(name="Top Server Scores", value=top_scores_message, inline=False)
                 
-                #TODO: It worked without deleting the message, at least for a little while :(
-                #Need to figure something out lol
-                await interaction.message.delete()
                 await interaction.response.send_message(content=None, embed=embed, file=file, ephemeral=private)
 
         view = discord.ui.View()
         view.add_item(ScoreSelect())
-        await interaction.response.send_message("Multiple scores found. Please select one:", view=view, ephemeral=private)
+        await interaction.response.send_message("Multiple scores found. Please select one:", view=view, ephemeral=True)
     else:
         selected_row = results[0]
         data = extract_course_data_from_row(selected_row)
@@ -406,13 +562,58 @@ async def course(interaction: discord.Interaction, song: str, isdouble: bool = F
 
         await interaction.response.send_message(content=None, embed=embed, file=file, ephemeral=private)
 
+
+
+# Quick access to the score command from score that was submitted or recalled
+class ScoreButton(discord.ui.Button):
+    def __init__(self, interaction: discord.Interaction, song: str, user: discord.User, isdouble: bool, ispump: bool, failed: bool, difficulty: int, pack: str, private: bool):
+        super().__init__(label="View Score", style=discord.ButtonStyle.primary)
+        self.interaction = interaction
+        self.song = song
+        self.user = user
+        self.isdouble = isdouble
+        self.ispump = ispump
+        self.failed = failed
+        self.difficulty = difficulty
+        self.pack = pack
+        self.private = private
+
+    async def callback(self, interaction: discord.Interaction):
+        # Retrieve the breakdown command
+        score_command = interaction.client.tree.get_command("score")
+        if score_command is None:
+            await interaction.response.send_message("The score command could not be found.", ephemeral=True)
+            return
+
+        # Create a namespace for the command arguments
+        class Namespace:
+            def __init__(self, **kwargs):
+                self.__dict__.update(kwargs)
+
+        # Prepare the arguments for the breakdown command
+        args = Namespace(
+            interaction=interaction,
+            song=self.song,
+            user=self.user,
+            isdouble=self.isdouble,
+            ispump=self.ispump,
+            iscourse=False,
+            failed=self.failed,
+            difficulty=self.difficulty,
+            pack=self.pack,
+            private=self.private
+        )
+
+        # Invoke the breakdown command
+        await score_command._invoke_with_namespace(interaction, args)
+
 #================================================================================================
 # compare two users
 #================================================================================================
 
 @client.tree.command(name="compare", description="Compare two users' scores. If only one user is provided, it will compare their scores with yours.")
 @app_commands.describe(user_one="The first user to compare", user_two="The second user to compare (optional)", private="Whether the response should be private", order="The order asc/desc_ex, _alpha, _diff")
-async def compare(interaction: discord.Interaction, user_two: discord.User, user_one: discord.User = None, isdouble: bool = False, iscourse: bool = False, page: int = 1, order: str = "desc_ex", private: bool = True, pack: str = "", difficulty: int = 0, song_name: str = ""):
+async def compare(interaction: discord.Interaction, user_two: discord.User, user_one: discord.User = None, isdouble: bool = False, ispump: bool = False, iscourse: bool = False, page: int = 1, order: str = "desc_ex", private: bool = True, pack: str = "", difficulty: int = 0, song_name: str = ""):
     if interaction.guild is None:
         await interaction.response.send_message("This command can only be used in a server.")
         return    
@@ -450,6 +651,8 @@ async def compare(interaction: discord.Interaction, user_two: discord.User, user
         tableType = 'DOUBLES'
     else:
         tableType = 'SINGLES'
+    if ispump:
+        tableType += '_PUMP'
 
     
     # Build the query with optional filters for difficulty and pack
@@ -553,8 +756,8 @@ async def compare_logic(interaction: discord.Interaction, page: int, order, priv
 #================================================================================================
 
 @client.tree.command(name="unplayed", description="Returns a list of songs that you have not played.")
-@app_commands.describe(user_two="User to compare (optional)", private="Whether the response should be private", order="The order asc/desc_ex, _alpha, _diff")
-async def unplayed(interaction: discord.Interaction, user_two: discord.User = None, isdouble: bool = False, iscourse: bool = False, page: int = 1, order: str = "desc_alpha", private: bool = True, pack: str = "", difficulty: int = 0):
+@app_commands.describe(user_two="User to compare (optional)", private="Whether the response should be private", order="The order asc/desc_ex, _alpha")
+async def unplayed(interaction: discord.Interaction, user_two: discord.User = None, isdouble: bool = False, ispump: bool = False, iscourse: bool = False, page: int = 1, order: str = "desc_alpha", private: bool = True, pack: str = "", difficulty: int = 0):
     if interaction.guild is None:
         await interaction.response.send_message("This command can only be used in a server.")
         return    
@@ -579,6 +782,8 @@ async def unplayed(interaction: discord.Interaction, user_two: discord.User = No
         tableType = 'DOUBLES'
     else:
         tableType = 'SINGLES'
+    if ispump:
+        tableType += '_PUMP'
 
 
     # Build the query with optional filters for difficulty and pack
@@ -677,7 +882,7 @@ async def unplayed_logic(interaction: discord.Interaction, page: int, order, pri
 #================================================================================================
 
 @client.tree.command(name="breakdown", description="More in depth breakdown of a score.")
-async def breakdown(interaction: discord.Interaction, song: str, user: discord.User = None, isdouble: bool = False, iscourse: bool = False,  failed: bool = False, difficulty: int = 0, pack: str = "", private: bool = False):
+async def breakdown(interaction: discord.Interaction, song: str, user: discord.User = None, isdouble: bool = False, ispump: bool = False, iscourse: bool = False,  failed: bool = False, difficulty: int = 0, pack: str = "", private: bool = False):
     if interaction.guild is None:
         await interaction.response.send_message("This command can only be used in a server.")
         return
@@ -691,13 +896,17 @@ async def breakdown(interaction: discord.Interaction, song: str, user: discord.U
         tableType += 'SINGLES'
     if failed:
         tableType += 'FAILS'
+    if ispump:
+        tableType += '_PUMP'
+
     
     query = 'SELECT * FROM ' + tableType + ' WHERE 1=1'
     
     params = []
 
+    name_column = "courseName" if iscourse else "songName"
     if song:
-        query += " AND songName LIKE ?"
+        query += f" AND {name_column} LIKE ?"
         params.append(f"%{song}%")
     if user:
         query += " AND userID = ?"
@@ -741,24 +950,81 @@ async def breakdown(interaction: discord.Interaction, song: str, user: discord.U
             async def callback(self, interaction: discord.Interaction):
                 selected_index = int(self.values[0])
                 selected_row = results[selected_index]
-                data = extract_data_from_row(selected_row)
+                if iscourse:
+                    data = extract_course_data_from_row(selected_row)
+                    data['isCourse'] = iscourse
+                else:
+                    data = extract_data_from_row(selected_row)
+                data['gameMode'] = 'pump' if ispump else 'itg'
                 embed, file = embedded_breakdown(data, str(user.id), "Selected Score", discord.Color.red() if failed else discord.Color.dark_grey())
-                
-                #TODO: It worked without deleting the message, at least for a little while :(
-                #Need to figure something out lol
-                await interaction.message.delete()
-                await interaction.response.send_message(content=None, embed=embed, file=file, ephemeral=private)
+
+                view = View()
+                view.add_item(ScoreButton(interaction, data['songName'], user, isdouble, ispump, failed, difficulty, pack, private))
+
+                await interaction.response.send_message(content=None, embed=embed, file=file, ephemeral=private, view=view)
 
         view = discord.ui.View()
         view.add_item(ScoreSelect())
-        await interaction.response.send_message("Multiple scores found. Please select one:", view=view, ephemeral=private)
+        await interaction.response.send_message("Multiple scores found. Please select one:", view=view, ephemeral=True)
     else:
         selected_row = results[0]
-        data = extract_data_from_row(selected_row)
+        if iscourse:
+            data = extract_course_data_from_row(selected_row)
+            data['isCourse'] = iscourse
+        else:
+            data = extract_data_from_row(selected_row)
+        data['gameMode'] = 'pump' if ispump else 'itg'
         embed, file = embedded_breakdown(data, str(user.id), "Selected Score", discord.Color.red() if failed else discord.Color.dark_grey())
+        view = View()
+        if not iscourse:
+            view.add_item(ScoreButton(interaction, data['songName'], user, isdouble, ispump, failed, difficulty, pack, private))
 
-        await interaction.response.send_message(content=None, embed=embed, file=file, ephemeral=private)
+        await interaction.response.send_message(content=None, embed=embed, file=file, ephemeral=private, view=view)
 
+
+
+# Quick access to the breakdown command from score that was submitted or recalled
+class BreakdownButton(discord.ui.Button):
+    def __init__(self, interaction: discord.Interaction, song: str, user: discord.User, isdouble: bool, ispump: bool, failed: bool, difficulty: int, pack: str, private: bool):
+        super().__init__(label="View Breakdown", style=discord.ButtonStyle.primary)
+        self.interaction = interaction
+        self.song = song
+        self.user = user
+        self.isdouble = isdouble
+        self.ispump = ispump
+        self.failed = failed
+        self.difficulty = difficulty
+        self.pack = pack
+        self.private = private
+
+    async def callback(self, interaction: discord.Interaction):
+        # Retrieve the breakdown command
+        breakdown_command = interaction.client.tree.get_command("breakdown")
+        if breakdown_command is None:
+            await interaction.response.send_message("The breakdown command could not be found.", ephemeral=True)
+            return
+
+        # Create a namespace for the command arguments
+        class Namespace:
+            def __init__(self, **kwargs):
+                self.__dict__.update(kwargs)
+
+        # Prepare the arguments for the breakdown command
+        args = Namespace(
+            interaction=interaction,
+            song=self.song,
+            user=self.user,
+            isdouble=self.isdouble,
+            ispump=self.ispump,
+            iscourse=False,  # Assuming this is not a course
+            failed=self.failed,
+            difficulty=self.difficulty,
+            pack=self.pack,
+            private=self.private
+        )
+
+        # Invoke the breakdown command
+        await breakdown_command._invoke_with_namespace(interaction, args)
 
 #================================================================================================
 # Database
@@ -769,27 +1035,41 @@ async def breakdown(interaction: discord.Interaction, song: str, user: discord.U
 def init_db():
     conn = sqlite3.connect(database)
     c = conn.cursor()
+
+    c.execute('''CREATE TABLE IF NOT EXISTS CONFIG
+                    (version TEXT PRIMARY KEY)''')
+
     c.execute('''CREATE TABLE IF NOT EXISTS USERS
                  (DiscordUser TEXT PRIMARY KEY, APIKey TEXT, submitDisabled TEXT DEFAULT 'enabled')''')
     
     c.execute('''CREATE TABLE IF NOT EXISTS CHANNELS
                  (serverID TEXT, channelID TEXT, PRIMARY KEY (serverID, channelID))''')
     
-    tablesNormal = ['SINGLES', 'SINGLESFAILS', 'DOUBLES', 'DOUBLESFAILS']
-    tablesCourses = ['COURSESSINGLES', 'COURSESSINGLESFAILS', 'COURSESDOUBLES', 'COURSESDOUBLESFAILS']
 
-    for table in tablesNormal:
-        c.execute(f'''CREATE TABLE IF NOT EXISTS {table}
-                 (userID TEXT, songName TEXT, artist TEXT, pack TEXT, difficulty TEXT,
-                  itgScore TEXT, exScore TEXT, grade TEXT, length TEXT, stepartist TEXT, hash TEXT,
-                  scatter JSON, life JSON, worstWindow TEXT, date TEXT, mods TEXT, description TEXT, prevBestEx TEXT)''')
-    
-    for table in tablesCourses:
-        c.execute(f'''CREATE TABLE IF NOT EXISTS {table}
-                 (userID TEXT, courseName TEXT, pack TEXT, entries TEXT, scripter TEXT, difficulty TEXT,
-                  description TEXT, itgScore TEXT, exScore TEXT, grade TEXT, hash TEXT,
-                  life JSON, date TEXT, mods TEXT, prevBestEx TEXT)''')
+    normal_schema = '''
+                 (userID TEXT, songName TEXT, artist TEXT, pack TEXT, difficulty INTEGER,
+                  itgScore REAL, exScore REAL, grade TEXT, length TEXT, stepartist TEXT, hash TEXT,
+                  scatter JSON, life JSON, worstWindow TEXT, date TEXT, mods TEXT, description TEXT, prevBestEx REAL, radar JSON)
+                  '''
+    course_schema = '''
+                 (userID TEXT, courseName TEXT, pack TEXT, entries TEXT, scripter TEXT, difficulty INTEGER,
+                  description TEXT, itgScore REAL, exScore REAL, grade TEXT, hash TEXT,
+                  life JSON, date TEXT, mods TEXT, prevBestEx REAL, radar JSON)
+                  '''
 
+    tables_normal = [
+        'SINGLES', 'SINGLESFAILS', 'DOUBLES', 'DOUBLESFAILS',
+        'SINGLES_PUMP', 'SINGLESFAILS_PUMP', 'DOUBLES_PUMP', 'DOUBLESFAILS_PUMP'
+    ]
+    tables_courses = [
+        'COURSESSINGLES', 'COURSESSINGLESFAILS', 'COURSESDOUBLES', 'COURSESDOUBLESFAILS',
+        'COURSESSINGLES_PUMP', 'COURSESSINGLESFAILS_PUMP', 'COURSESDOUBLES_PUMP', 'COURSESDOUBLESFAILS_PUMP'
+    ]
+
+    for table in tables_normal:
+        c.execute(f'CREATE TABLE IF NOT EXISTS {table} {normal_schema}')
+    for table in tables_courses:
+        c.execute(f'CREATE TABLE IF NOT EXISTS {table} {course_schema}')
 
 
     conn.commit()
@@ -807,6 +1087,11 @@ def embedded_score(data, user_id, title="Users Best Score", color=discord.Color.
     if data.get('prevBestEx') is None:
         data['prevBestEx'] = 0
 
+        if data.get('gameMode') == 'pump':
+            title = f"{title} - PUMP"
+        else:
+            title = f"{title} - ITG"
+
     if data.get('songName'):
         if data.get('scatterplotData') is None:
             embed = discord.Embed(title="Unable to recall score", color=color)
@@ -819,22 +1104,21 @@ def embedded_score(data, user_id, title="Users Best Score", color=discord.Color.
             style = 'D'
         else:
             style = 'S'
-
-
+            
         grade = data.get('grade')
         mapped_grade = grade_mapping.get(grade, grade)
         embed = discord.Embed(title=title, color=color)
         embed.add_field(name="User", value=f"<@{user_id}>", inline=False)
         embed.add_field(name="Song", value=data.get('songName'), inline=True)
-        embed.add_field(name="Artist", value=data.get('artist'), inline=True)
+        # embed.add_field(name="Artist", value=data.get('artist'), inline=True)
         embed.add_field(name="Pack", value=data.get('pack'), inline=True)
-        embed.add_field(name="Difficulty", value= style + data.get('difficulty'), inline=True)
-        embed.add_field(name="ITG Score", value=f"{data.get('itgScore')}%", inline=True)
+        embed.add_field(name="Difficulty", value= style + str(data.get('difficulty')), inline=True)
+        # embed.add_field(name="ITG Score", value=f"{data.get('itgScore')}%", inline=True)
         upscore = round(float(data.get('exScore')) - float(data.get('prevBestEx')), 2)
         embed.add_field(name="EX Score", value=f"{data.get('exScore')}% (+ {upscore}%)", inline=True)
         embed.add_field(name="Grade", value=mapped_grade, inline=True)
         embed.add_field(name="Length", value=data.get('length'), inline=True)
-        embed.add_field(name="Stepartist", value=data.get('stepartist'), inline=True)
+        # embed.add_field(name="Stepartist", value=data.get('stepartist'), inline=True)
         embed.add_field(name="Date played", value=data.get('date'), inline=True)
         embed.add_field(name="Mods", value=data.get('mods'), inline=True)
 
@@ -857,7 +1141,7 @@ def embedded_score(data, user_id, title="Users Best Score", color=discord.Color.
         embed.add_field(name="Course", value=data.get('courseName'), inline=True)
         embed.add_field(name="Scripter", value=data.get('scripter'), inline=True)
         embed.add_field(name="Pack", value=data.get('pack'), inline=True)
-        embed.add_field(name="Difficulty", value= style + data.get('difficulty'), inline=True)
+        embed.add_field(name="Difficulty", value= style + str(data.get('difficulty')), inline=True)
         embed.add_field(name="ITG Score", value=f"{data.get('itgScore')}%", inline=True)
         upscore = round(float(data.get('exScore')) - float(data.get('prevBestEx')), 2)
         embed.add_field(name="EX Score", value=f"{data.get('exScore')}% (+ {upscore}%)", inline=True)
@@ -878,6 +1162,44 @@ def embedded_score(data, user_id, title="Users Best Score", color=discord.Color.
 
 def embedded_breakdown(data, user_id, title="Score Breakdown", color=discord.Color.dark_grey()):
     
+    if data.get('gameMode') == 'pump':
+        title = f"{title} - PUMP"
+    else:
+        title = f"{title} - ITG"
+
+    if data.get('isCourse'):
+        embed = discord.Embed(title=f"{title}", color=color)
+        embed.add_field(name="User", value=f"<@{user_id}>", inline=False)
+        embed.add_field(name="Course Name", value=data.get('courseName'), inline=True)
+        embed.add_field(name="Pack", value=data.get('pack'), inline=True)
+        embed.add_field(name="EX Score", value=f"{data.get('exScore')}%", inline=True)
+        embed.add_field(name="Date played", value=data.get('date'), inline=False)
+        embed.add_field(name="Scripter", value=data.get('scripter'), inline=True)
+        radar = data.get('radar')
+        if radar:
+            embed.add_field(name="Holds/Rolls/Mines", value=f"""
+                        Holds: {radar.get('Holds')[0]}/{radar.get('Holds')[1]}
+                        Rolls: {radar.get('Rolls')[0]}/{radar.get('Rolls')[1]}
+                        Mines: {radar.get('Mines')[0]}/{radar.get('Mines')[1]}""", inline=True)
+        else:
+            embed.add_field(name="Holds/Rolls/Mines", value="No radar data available", inline=True)
+        embed.add_field(name="Mods", value=data.get('mods'), inline=True)
+
+        entries = data.get('entries')
+        entries_str = ""
+        for entry in entries:
+            length_sec = int(round(float(entry.get('length', 0))))
+            mins = length_sec // 60
+            secs = length_sec % 60
+            entries_str += f"{entry.get('name', 'Unknown')} - {entry.get('artist', 'Unknown')} - {entry.get('difficulty', 'N/A')} - {mins}:{secs:02d}\n"
+        entries_str = entries_str.strip()  # Remove trailing newline
+        embed.add_field(name="Song | Artist | Diff | Length", value=entries_str, inline=True)
+
+        create_scatterplot_from_json(None, data.get('lifebarInfo'), output_file='scatterplot.png')
+        file = discord.File('scatterplot.png', filename='scatterplot.png')
+        embed.set_image(url="attachment://scatterplot.png")
+        return embed, file
+
 
     if data.get('worstWindow') is None:
         embed = discord.Embed(title="Unable to create breakdown", color=color)
@@ -886,9 +1208,8 @@ def embedded_breakdown(data, user_id, title="Score Breakdown", color=discord.Col
         embed.set_image(url="attachment://lmao2.gif")
         return embed, file
 
-    grade = data.get('grade')
-    mapped_grade = grade_mapping.get(grade, grade)
-    embed = discord.Embed(title=title, color=color)
+
+    embed = discord.Embed(title=f"{title}", color=color)
     embed.add_field(name="User", value=f"<@{user_id}>", inline=False)
     embed.add_field(name="Song", value=data.get('songName'), inline=True)
     embed.add_field(name="Pack", value=data.get('pack'), inline=True)
@@ -952,6 +1273,14 @@ def embedded_breakdown(data, user_id, title="Score Breakdown", color=discord.Col
                     WO:  {judgements['e_wo']+judgements['l_wo']} ({judgements['e_wo']}/{judgements['l_wo']})
                     Miss: {judgements['miss']}""", inline=True)
 
+    radar = data.get('radar')
+    if radar:
+        embed.add_field(name="Holds/Rolls/Mines", value=f"""
+                        Holds: {radar.get('Holds')[0]}/{radar.get('Holds')[1]}
+                        Rolls: {radar.get('Rolls')[0]}/{radar.get('Rolls')[1]}
+                        Mines: {radar.get('Mines')[0]}/{radar.get('Mines')[1]}""", inline=True)
+    else:
+        embed.add_field(name="Holds/Rolls/Mines", value="No radar data available", inline=True)
 
     y_values = np.array([100 - point['y'] for point in data.get('scatterplotData') if point['y'] not in [0, 200]])
     
@@ -978,8 +1307,9 @@ def embedded_breakdown(data, user_id, title="Score Breakdown", color=discord.Col
                     mean: {mean}ms
                     std dev*3: {std_dev_3}ms
                     max error: {max_error}ms
-                    Note that the numbers are rounded differently then in SL.""",
+                    (SL rounds differently)""",
                     inline=True)
+    embed.add_field(name="Mods", value=data.get('mods'), inline=True)
 
     create_distribution_from_json(data.get('scatterplotData'), data.get('worstWindow'), output_file='distribution.png')
     # Send the embed with the image attachment
@@ -1027,11 +1357,9 @@ def send_message():
     data = request.json
     api_key = data.get('api_key')
 
-    #print(data)
-
     # Check if the request contains an API key
     if not api_key:
-        return jsonify({'status': 'Request is missing API Key.'}), 402
+        return jsonify({'status': 'Submission is missing API Key.'}), 402
 
     # Check if the API key exists in the database and fetch DiscordUser and submitDisabled
     conn = sqlite3.connect(database)
@@ -1049,26 +1377,25 @@ def send_message():
     required_keys_song = [
         'songName', 'artist', 'pack', 'length', 'stepartist', 'difficulty', 'description',
         'itgScore', 'exScore', 'grade', 'hash', 'scatterplotData', 'lifebarInfo',
-        'worstWindow', 'style', 'modifiers'
+        'worstWindow', 'style', 'mods', 'radar', 'gameMode'
     ]
     required_keys_course = [
         'courseName', 'pack', 'entries', 'hash', 'scripter', 'itgScore', 'description',
-        'exScore', 'grade', 'lifebarInfo', 'style', 'modifiers', 'difficulty'
+        'exScore', 'grade', 'lifebarInfo', 'style', 'mods', 'difficulty', 'radar', 'gameMode'
     ]
 
     if not (all(key in data for key in required_keys_song) or all(key in data for key in required_keys_course)):
-        #print("Request is missing required data.")
         
-        user = client.get_user(int(user_id))
+        # user = client.get_user(int(user_id))
 
-        asyncio.run_coroutine_threadsafe(
-        user.send(
-            "Your score was not submitted. Your submission is missing some data. Please update your module to the latest version to ensure all required data is sent."
-        ),
-        client.loop
-        )
+        # asyncio.run_coroutine_threadsafe(
+        # user.send(
+        #     "Your score was not submitted. Your submission is missing some data. Please update your module to the latest version to ensure all required data is sent."
+        # ),
+        # client.loop
+        # )
         print("Something is missing")
-        return jsonify({'status': 'Request is missing some data field(s).'}), 400
+        return jsonify({'status': 'Submission is missing data. Update module to the latest version.'}), 400
     
     isPB = True
     tableType = ''
@@ -1083,6 +1410,9 @@ def send_message():
         tableType += 'FAILS'
         isPB = False
     
+    if data.get('gameMode') == 'pump':
+        tableType += '_PUMP'
+    
     conn = sqlite3.connect(database)
     c = conn.cursor()
 
@@ -1095,27 +1425,25 @@ def send_message():
     # Compare the ex score
     existing_ex_score = float(existing_entry[0]) if existing_entry else 0
     new_ex_score = float(data.get('exScore'))
-
-
-
     
     if existing_entry and new_ex_score > existing_ex_score:
         if data.get('courseName'):
-            updateExisting = 'UPDATE ' + tableType + ' SET itgScore = ?, exScore = ?, grade = ?, life = ?, date = ?, mods = ?, prevBestEx = ? WHERE hash = ? AND userID = ?'
+            updateExisting = 'UPDATE ' + tableType + ' SET itgScore = ?, exScore = ?, grade = ?, life = ?, date = ?, mods = ?, prevBestEx = ?, radar = ? WHERE hash = ? AND userID = ?'
             c.execute(updateExisting,
                       (data.get('itgScore'), 
                        new_ex_score,
                        data.get('grade'), 
                        str(data.get('lifebarInfo')), 
                        datetime.now().strftime(os.getenv('DATE_FORMAT')),
-                       data.get('modifiers'),
+                       data.get('mods'),
                        existing_ex_score,
+                       str(data.get('radar')),
                        data.get('hash'),
                        user_id))
             conn.commit()
 
         else:
-            updateExisting = 'UPDATE ' + tableType + ' SET itgScore = ?, exScore = ?, grade = ?, scatter = ?, life = ?, worstWindow = ?, date = ?, mods = ?, length = ?, prevBestEx = ? WHERE hash = ? AND userID = ?'
+            updateExisting = 'UPDATE ' + tableType + ' SET itgScore = ?, exScore = ?, grade = ?, scatter = ?, life = ?, worstWindow = ?, date = ?, mods = ?, length = ?, prevBestEx = ?, radar = ? WHERE hash = ? AND userID = ?'
             c.execute(updateExisting, 
                       (data.get('itgScore'), 
                        new_ex_score,
@@ -1124,9 +1452,10 @@ def send_message():
                        str(data.get('lifebarInfo')), 
                        data.get('worstWindow'), 
                        datetime.now().strftime(os.getenv('DATE_FORMAT')),
-                       data.get('modifiers'),
+                       data.get('mods'),
                        data.get('length'), # I was sending the wrong value lmao
                        existing_ex_score,
+                       str(data.get('radar')),
                        data.get('hash'),
                        user_id))
             conn.commit()
@@ -1134,12 +1463,12 @@ def send_message():
 
     elif new_ex_score > existing_ex_score:
         if data.get('courseName'):
-            insertNew = 'INSERT INTO ' + tableType + ' (userID, courseName, pack, entries, scripter, itgScore, exScore, grade, hash, life, date, mods, difficulty, description, prevBestEx) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            insertNew = 'INSERT INTO ' + tableType + ' (userID, courseName, pack, entries, scripter, itgScore, exScore, grade, hash, life, date, mods, difficulty, description, prevBestEx, radar) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             c.execute(insertNew,
                       (user_id, 
                        data.get('courseName'), 
                        data.get('pack'), 
-                       data.get('entries'), 
+                       str(data.get('entries')), 
                        data.get('scripter'), 
                        data.get('itgScore'), 
                        new_ex_score, 
@@ -1147,14 +1476,16 @@ def send_message():
                        data.get('hash'), 
                        str(data.get('lifebarInfo')), 
                        datetime.now().strftime(os.getenv('DATE_FORMAT')),
-                       data.get('modifiers'),
+                       data.get('mods'),
                        data.get('difficulty'),
                        data.get('description'),
-                       '0'))
+                       '0',
+                       str(data.get('radar'))
+                       ))
                        
             conn.commit()
         else:
-            insertNew = 'INSERT INTO ' + tableType + ' (userID, songName, artist, pack, difficulty, itgScore, exScore, grade, length, stepartist, hash, scatter, life, worstWindow, date, mods, description, prevBestEx) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            insertNew = 'INSERT INTO ' + tableType + ' (userID, songName, artist, pack, difficulty, itgScore, exScore, grade, length, stepartist, hash, scatter, life, worstWindow, date, mods, description, prevBestEx, radar) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             c.execute(insertNew,
                       (user_id, 
                        data.get('songName'), 
@@ -1171,13 +1502,15 @@ def send_message():
                        str(data.get('lifebarInfo')), 
                        data.get('worstWindow'), 
                        datetime.now().strftime(os.getenv('DATE_FORMAT')),
-                       data.get('modifiers'),
+                       data.get('mods'),
                        data.get('description'),
-                       '0'))
+                       '0',
+                       str(data.get('radar'))
+                       ))
+            
             conn.commit()
     else:
         isPB = False
-
 
     # Check if submit_disabled is a date and time and if it is past that time and date
     if submit_disabled != 'enabled' and submit_disabled != 'disabled':
@@ -1194,44 +1527,50 @@ def send_message():
 
     if isPB and submit_disabled == 'enabled':
 
+        data['date'] = datetime.now().strftime(os.getenv('DATE_FORMAT'))
+        data['prevBestEx'] = existing_ex_score
+        if data.get('courseName'):
+            color = discord.Color.purple()
+        elif data.get('style') == 'double':
+            color = discord.Color.blue()
+        else:
+            color = discord.Color.green()
+        
+        embed, file = embedded_score(data, user_id, "New (Server) Personal Best!", color)
 
+        conn = sqlite3.connect(database)
+        c = conn.cursor()
+        
+        channel_results = []
         for guild in client.guilds:
-            #print("Guilds: ", guild.name)
+            if guild.get_member(int(user_id)):
 
-            c.execute('SELECT channelID FROM CHANNELS WHERE serverID = ?', (str(guild.id),))
-            channel_results = c.fetchall()
+                c.execute('SELECT channelID FROM CHANNELS WHERE serverID = ?', (str(guild.id),))
+                channel_results.extend([channel[0] for channel in c.fetchall()])
 
-            for channel_result in channel_results:
-                channel_id = int(channel_result[0])
-                channel = client.get_channel(channel_id)
-                if channel:
-                    #print(f"Sending message to channel: {channel.name} (ID: {channel_id}) in guild: {guild.name}")
-                    
-                    data['date'] = datetime.now().strftime(os.getenv('DATE_FORMAT'))
-                    data['prevBestEx'] = existing_ex_score
-                    
-                    if data.get('courseName'):
-                        color = discord.Color.purple()
-                    elif data.get('style') == 'double':
-                        color = discord.Color.blue()
-                    else:
-                        color = discord.Color.green()
+        getTopScores = f'SELECT userID, exScore FROM {tableType} WHERE hash = ? ORDER BY exScore DESC'
+        c.execute(getTopScores, (data.get('hash'),))
+        top_scores = c.fetchall()
 
-                    embed, file = embedded_score(data, user_id, "New (Server) Personal Best!", color)
-                    #embed.set_image(url="attachment://scatterplot.png")
-                    
-                    toPost = 'SELECT userID, exScore FROM ' + tableType + ' WHERE hash = ? AND userID IN (SELECT userID FROM ' + tableType + ' WHERE hash = ?) ORDER BY exScore DESC LIMIT 3'
-                    c.execute(toPost, (data.get('hash'), data.get('hash')))
-                    top_scores = c.fetchall()
 
-                    # Filter the top scores to include only members of the current guild
-                    top_scores = [(uid, ex_score) for uid, ex_score in top_scores if guild.get_member(int(uid))]
+        embed.add_field(name="Top Server Scores", value="", inline=False)
+        for channel_id in channel_results:
+            channel = client.get_channel(int(channel_id))
 
-                    # Format the top 3 scores
-                    top_scores_message = ""
-                    for idx, (uid, ex_score) in enumerate(top_scores, start=1):
-                        top_scores_message += f"{idx}. <@!{uid}>, EX Score: {ex_score}%\n"
+            # Filter the top scores to include only members of the current guild
+            top_selected_scores = [(uid, ex_score) for uid, ex_score in top_scores if channel.guild.get_member(int(uid))][:3]
 
+            # Format the top 3 scores
+            top_scores_message = ""
+            for idx, (uid, ex_score) in enumerate(top_selected_scores, start=1):
+                top_scores_message += f"{idx}. <@!{uid}>, EX Score: {ex_score}%\n"
+            
+            embed.set_field_at(index=-1, name="Top Server Scores", value=top_scores_message, inline=False)
+            
+            asyncio.run_coroutine_threadsafe(
+                channel.send(embed=embed, file=discord.File('scatterplot.png', filename='scatterplot.png'), allowed_mentions=discord.AllowedMentions.none()),
+                client.loop
+            )
 
                     
                     embed.add_field(name="Top Server Scores", value=top_scores_message, inline=False)
@@ -1269,8 +1608,7 @@ def send_message():
 
 
     conn.close()
-    return jsonify({'status': 'success'}), 200
-
+    return jsonify({'status': 'Submission has been successfully inserted.'}), 200
 
 #================================================================================================
 # Run Flask, run Discord bot
