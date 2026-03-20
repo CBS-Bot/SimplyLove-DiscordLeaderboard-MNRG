@@ -1,3 +1,6 @@
+
+version = "1.3.0"
+
 local function debugPrint(message)
     Trace("[DiscordLeaderboard] "..message)
 end
@@ -185,8 +188,16 @@ local function encodeValue(value)
             end
             return "[" .. table.concat(result, ",") .. "]"
         else
-            for k, v in pairs(value) do
-                table.insert(result, '"' .. escapeString(k) .. '":' .. encodeValue(v))
+            -- Special handling for scatterplot data points to maintain x, y, color order
+            if value.x and value.y and value.color then
+                table.insert(result, '"x":' .. encodeValue(value.x))
+                table.insert(result, '"y":' .. encodeValue(value.y))
+                table.insert(result, '"color":' .. encodeValue(value.color))
+            else
+                -- Use original method for other objects
+                for k, v in pairs(value) do
+                    table.insert(result, '"' .. escapeString(k) .. '":' .. encodeValue(v))
+                end
             end
             return "{" .. table.concat(result, ",") .. "}"
         end
@@ -202,6 +213,13 @@ end
 --------------------------------------------------------------------------------------------------
 
 local function sendData(data, botURL, callback)
+    -- Check data size before sending
+    local dataSize = string.len(data)
+    debugPrint("Sending data of size: " .. dataSize .. " bytes to " .. botURL)
+    
+    if dataSize > 1048576 then -- 1MB limit
+        debugPrint("Warning: Data size is very large (" .. math.floor(dataSize/1024) .. "KB), this might cause issues")
+    end
 
     -- Send HTTP POST request
     NETWORK:HttpRequest{
@@ -212,15 +230,201 @@ local function sendData(data, botURL, callback)
             ["Content-Type"] = "application/json"
         },
         onResponse = function(response)
-            local code = response.statusCode or nil
-            local response_body = response.body or nil
+            local code = response.statusCode or 0
+            local response_body = response.body or ""
+            
+            debugPrint("HTTP Response - Code: " .. tostring(code) .. ", Body length: " .. string.len(response_body))
+            
+            if code == 0 or response_body == "" then
+                if callback then
+                    callback(code, "Network error or timeout - no response received")
+                end
+                return
+            end
+            
             local decoded = JsonDecode(response_body)
-            local body = decoded and decoded.status or tostring(body)
+            local body = decoded and decoded.status or response_body
             if callback then
                 callback(code, body)
             end
         end
     }
+end
+
+--------------------------------------------------------------------------------------------------
+
+-- Send data in chunks for large datasets
+local function sendDataInChunks(data, botURL, callback)
+    local dataSize = string.len(data)
+    debugPrint("Total data size: " .. dataSize .. " bytes")
+    
+    -- If data is small enough, send normally
+    if dataSize < 500000 then -- 500KB limit
+        debugPrint("Data size is manageable, sending normally")
+        return sendData(data, botURL, callback)
+    end
+    
+    debugPrint("Data is large, attempting to send in chunks")
+    
+    -- Parse the JSON to extract large arrays
+    local decoded = JsonDecode(data)
+    if not decoded then
+        debugPrint("Failed to parse data for chunking, sending normally")
+        return sendData(data, botURL, callback)
+    end
+    
+    local scatterplotData = decoded.scatterplotData
+    local lifebarInfo = decoded.lifebarInfo
+    
+    -- Check if we have large arrays to chunk
+    local needsChunking = false
+    if scatterplotData and #scatterplotData > 1000 then
+        needsChunking = true
+    elseif lifebarInfo and #lifebarInfo > 500 then
+        needsChunking = true
+    end
+    
+    if not needsChunking then
+        debugPrint("No large arrays found, sending normally")
+        return sendData(data, botURL, callback)
+    end
+    
+    -- Remove large arrays from main payload
+    decoded.scatterplotData = nil
+    decoded.lifebarInfo = nil
+    decoded.isChunked = true
+    
+    -- Calculate number of chunks needed
+    local chunkSize = 1000 -- points per chunk
+    local scatterChunks = 0
+    local lifebarChunks = 0
+    
+    if scatterplotData then
+        scatterChunks = math.ceil(#scatterplotData / chunkSize)
+    end
+    if lifebarInfo then
+        lifebarChunks = math.ceil(#lifebarInfo / chunkSize)
+    end
+    
+    decoded.totalChunks = scatterChunks + lifebarChunks + 1 -- +1 for main data
+    decoded.scatterplotChunks = scatterChunks
+    decoded.lifebarChunks = lifebarChunks
+    
+    local mainData = encode(decoded)
+    
+    -- Smart URL handling - ensure we have the right endpoints
+    local baseURL = botURL
+    local chunkURL, sendURL
+    
+    if string.match(baseURL, "/send$") then
+        -- If URL ends with /send, use base for send and base-without-send + /chunk for chunks
+        sendURL = baseURL
+        chunkURL = string.gsub(baseURL, "/send$", "/chunk")
+    else
+        -- If URL doesn't end with /send, assume it's base URL
+        if string.match(baseURL, "/$") then
+            -- URL ends with /, just append endpoints
+            sendURL = baseURL .. "send"
+            chunkURL = baseURL .. "chunk"
+        else
+            -- URL doesn't end with /, add / and endpoints
+            sendURL = baseURL .. "/send"
+            chunkURL = baseURL .. "/chunk"
+        end
+    end
+    
+    debugPrint("Using URLs - Chunks: " .. chunkURL .. ", Main data: " .. sendURL)
+    debugPrint("Sending " .. scatterChunks .. " scatterplot chunks and " .. lifebarChunks .. " lifebar chunks first, then main data")
+    
+    local chunksToSend = scatterChunks + lifebarChunks
+    local chunksCompleted = 0
+    local hasError = false
+    
+    local function checkAllChunksSent()
+        chunksCompleted = chunksCompleted + 1
+        debugPrint("Chunk completed: " .. chunksCompleted .. "/" .. chunksToSend)
+        
+        if chunksCompleted >= chunksToSend and not hasError then
+            debugPrint("All chunks sent successfully, now sending main data")
+            sendData(mainData, sendURL, callback)
+        end
+    end
+    
+    local function handleChunkError(code, body, chunkType, chunkIndex)
+        if not hasError then
+            hasError = true
+            debugPrint("Failed to send " .. chunkType .. " chunk " .. chunkIndex .. ": " .. tostring(code) .. " - " .. tostring(body))
+            if callback then 
+                callback(code, "Failed to send " .. chunkType .. " chunk " .. chunkIndex .. ": " .. tostring(body)) 
+            end
+        end
+    end
+    
+    -- Send scatterplot chunks first
+    if scatterplotData then
+        for i = 1, scatterChunks do
+            local startIdx = (i - 1) * chunkSize + 1
+            local endIdx = math.min(i * chunkSize, #scatterplotData)
+            local chunk = {}
+            for j = startIdx, endIdx do
+                table.insert(chunk, scatterplotData[j])
+            end
+            
+            local chunkData = encode({
+                hash = decoded.hash,
+                api_key = decoded.api_key,
+                chunkType = "scatterplot",
+                chunkIndex = i,
+                totalChunks = scatterChunks,
+                data = chunk
+            })
+            
+            debugPrint("Sending scatterplot chunk " .. i .. "/" .. scatterChunks .. " (" .. #chunk .. " points)")
+            sendData(chunkData, chunkURL, function(code, body)
+                if code == 200 then
+                    checkAllChunksSent()
+                else
+                    handleChunkError(code, body, "scatterplot", i)
+                end
+            end)
+        end
+    end
+    
+    -- Send lifebar chunks
+    if lifebarInfo then
+        for i = 1, lifebarChunks do
+            local startIdx = (i - 1) * chunkSize + 1
+            local endIdx = math.min(i * chunkSize, #lifebarInfo)
+            local chunk = {}
+            for j = startIdx, endIdx do
+                table.insert(chunk, lifebarInfo[j])
+            end
+            
+            local chunkData = encode({
+                hash = decoded.hash,
+                api_key = decoded.api_key,
+                chunkType = "lifebar",
+                chunkIndex = i,
+                totalChunks = lifebarChunks,
+                data = chunk
+            })
+            
+            debugPrint("Sending lifebar chunk " .. i .. "/" .. lifebarChunks .. " (" .. #chunk .. " points)")
+            sendData(chunkData, chunkURL, function(code, body)
+                if code == 200 then
+                    checkAllChunksSent()
+                else
+                    handleChunkError(code, body, "lifebar", i)
+                end
+            end)
+        end
+    end
+    
+    -- If no chunks to send, send main data immediately
+    if chunksToSend == 0 then
+        debugPrint("No chunks to send, sending main data immediately")
+        sendData(mainData, sendURL, callback)
+    end
 end
 
 --------------------------------------------------------------------------------------------------
@@ -429,7 +633,7 @@ local function SongResultData(player, apiKey, style, gameMode)
 
     -- Prepare JSON data
     local jsonData = string.format(
-        '{"api_key": "%s","songName": "%s","artist": "%s","pack": "%s","length": "%s","stepartist": "%s","difficulty": "%s", "description": "%s", "itgScore": "%s","exScore": "%s","grade": "%s", "hash": "%s", "scatterplotData": %s, "lifebarInfo": %s, "worstWindow": %s, "style": "%s", "mods": "%s", "radar": %s, "gameMode": "%s"}',
+        '{"api_key": "%s","songName": "%s","artist": "%s","pack": "%s","length": "%s","stepartist": "%s","difficulty": "%s", "description": "%s", "itgScore": "%s","exScore": "%s","grade": "%s", "hash": "%s", "scatterplotData": %s, "lifebarInfo": %s, "worstWindow": %s, "style": "%s", "mods": "%s", "radar": %s, "gameMode": "%s", "version": "%s"}',
         apiKey,
         songInfo.name,
         songInfo.artist,
@@ -448,7 +652,8 @@ local function SongResultData(player, apiKey, style, gameMode)
         style,
         songInfo.modifiers,
         encode(resultInfo.radar),
-        gameMode
+        gameMode,
+        version
         )  
 
     return jsonData
@@ -508,7 +713,7 @@ local function CourseResultData(player, apiKey, style, gameMode)
 
     -- Prepare JSON data
     local jsonData = string.format(
-        '{"api_key": "%s", "courseName": "%s", "pack": "%s", "entries": %s, "hash": "%s", "scripter": "%s", "difficulty": "%s", "description": "%s", "itgScore": "%s", "exScore": "%s", "grade": "%s", "lifebarInfo": %s, "style": "%s", "mods": "%s", "radar": %s, "gameMode": "%s"}',
+        '{"api_key": "%s", "courseName": "%s", "pack": "%s", "entries": %s, "hash": "%s", "scripter": "%s", "difficulty": "%s", "description": "%s", "itgScore": "%s", "exScore": "%s", "grade": "%s", "lifebarInfo": %s, "style": "%s", "mods": "%s", "radar": %s, "gameMode": "%s", "version": "%s"}',
         apiKey,
         courseInfo.name,
         courseInfo.pack,
@@ -524,7 +729,8 @@ local function CourseResultData(player, apiKey, style, gameMode)
         style,
         courseInfo.modifiers,
         encode(resultInfo.radar),
-        gameMode
+        gameMode,
+        version
         )
 
     return jsonData
@@ -565,7 +771,9 @@ u["ScreenEvaluationStage"] = Def.Actor {
             if botURL ~= nil and apiKey ~= nil then
                 if allValid then
                     local data = SongResultData(player, apiKey, style, gameMode)
-                    sendData(data, botURL, function(code, body)
+                    
+                    -- Use chunked sending for potentially large data
+                    sendDataInChunks(data, botURL, function(code, body)
                         if code == 200 then
                             SM("DiscordLeaderboard: " .. ToEnumShortString(player) .. " Score successfully submitted.")
                         else
@@ -634,7 +842,9 @@ u["ScreenEvaluationNonstop"] = Def.ActorFrame {
                     if allValid then
                     -- Different day different data
                     local data = CourseResultData(player, apiKey, style, gameMode)
-                        sendData(data, botURL, function(code, body)
+                        
+                        -- Use chunked sending for potentially large data
+                        sendDataInChunks(data, botURL, function(code, body)
                             if code == 200 then
                                 SM("DiscordLeaderboard: " .. ToEnumShortString(player) .. " Score successfully submitted.")
                             else
