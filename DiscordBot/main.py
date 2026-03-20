@@ -39,6 +39,8 @@ sys.stdout.reconfigure(line_buffering=True)
 
 logger = logging.getLogger(__name__)
 
+tracked_pack_name = "ITL Online 2026"
+
 
 #================================================================================================
 # Set up the Discord bot and Flask app 
@@ -95,6 +97,7 @@ async def help(Interaction: discord.Interaction):
     `/breakdown - More in depth breakdown of a score.`
     `/compare - Compare two users' scores.`
     `/usethischannel - (Un)Sets the current channel as the results channel. You may use it in multiple channels. (Admin only).`
+    `/setpacktrackername - Set the string to track scores for. (Admin only)`
     """
 
     await Interaction.response.send_message(message, ephemeral=True)
@@ -136,6 +139,50 @@ async def usethischannel_error(Interaction: discord.Interaction, error: app_comm
         await Interaction.response.send_message("You do not have the required permissions to use this command.", ephemeral=True)
     else:
         await Interaction.response.send_message("An error occurred while trying to run this command.", ephemeral=True)
+
+
+#================================================================================================
+# Command to set/get the pack name to track pins for
+#================================================================================================
+
+@client.tree.command(name="setpacktrackername", description="Set the string to track scores for. (Admin only)")
+@app_commands.checks.has_permissions(administrator=True)
+@app_commands.describe(pack_name="The string to track scores for.")
+async def setpacktrackername(Interaction: discord.Interaction, pack_name: str):
+    if Interaction.guild is None:
+        await Interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
+        return
+
+    global tracked_pack_name
+    tracked_pack_name = pack_name
+
+    await Interaction.response.send_message(f"Tracked pack name updated to: {tracked_pack_name}", ephemeral=True)
+
+@usethischannel.error
+async def setpacktrackername_error(Interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.MissingPermissions):
+        await Interaction.response.send_message("You do not have the required permissions to use this command.", ephemeral=True)
+    else:
+        await Interaction.response.send_message("An error occurred while trying to run this command.", ephemeral=True)
+
+
+@client.tree.command(name="getpacktrackername", description="Get the string to track scores for. (Admin only)")
+@app_commands.checks.has_permissions(administrator=True)
+async def getpacktrackername(Interaction: discord.Interaction):
+    if Interaction.guild is None:
+        await Interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
+        return
+
+    global tracked_pack_name
+    await Interaction.response.send_message(f"Tracked pack name currently is: {tracked_pack_name}", ephemeral=True)
+
+@usethischannel.error
+async def getpacktrackername_error(Interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.MissingPermissions):
+        await Interaction.response.send_message("You do not have the required permissions to use this command.", ephemeral=True)
+    else:
+        await Interaction.response.send_message("An error occurred while trying to run this command.", ephemeral=True)
+
 
 #================================================================================================
 # ADMIN COMMAND: Delete score - EXPERIMENTAL
@@ -1684,35 +1731,35 @@ def send_message():
             )
 
                     
-                    embed.add_field(name="Top Server Scores", value=top_scores_message, inline=False)
+            embed.add_field(name="Top Server Scores", value=top_scores_message, inline=False)
 
-                    try:
-                        if "ITL Online 2025" in data.get('pack'):
-                            message = asyncio.run_coroutine_threadsafe(channel.send(embed=embed, file=file, allowed_mentions=discord.AllowedMentions.none()), client.loop)
+            try:
+                if tracked_pack_name in data.get('pack'):
+                    message = asyncio.run_coroutine_threadsafe(channel.send(embed=embed, file=file, allowed_mentions=discord.AllowedMentions.none()), client.loop)
 
-                            # Pin any quads or quints
-                            if data.get('grade') == "Grade_Tier01":
+                    # Pin any quads or quints
+                    if data.get('grade') == "Grade_Tier01":
 
-                                # Oh this nesting sucks, but it's temporary (for now)
-                                # and we don't care if this fails honestly.
+                        # Oh this nesting sucks, but it's temporary (for now)
+                        # and we don't care if this fails honestly.
 
-                                # Unpin the oldest pin if there's 50 pins
-                                try:
-                                    res = asyncio.run_coroutine_threadsafe(channel.pins(), client.loop)
-                                    pins = res.result()
-                                    logging.info(f"Number of pins found: {len(pins)}.")
-                                    pins.sort(key=lambda x: x.created_at)
-                                    if len(pins) == 50:
-                                        logging.info(f"50 pins found. Unpinning message from {pins[0].created_at}.")
-                                        asyncio.run_coroutine_threadsafe(pins[0].unpin(), client.loop)
-                                        time.sleep(3)
-                                except Exception as e:
-                                    logging.info(f"Error occurred while figuring out what pin to unpin.")
+                        # Unpin the oldest pin if there's 50 pins
+                        try:
+                            res = asyncio.run_coroutine_threadsafe(channel.pins(), client.loop)
+                            pins = res.result()
+                            logging.info(f"Number of pins found: {len(pins)}.")
+                            pins.sort(key=lambda x: x.created_at)
+                            if len(pins) == 50:
+                                logging.info(f"50 pins found. Unpinning message from {pins[0].created_at}.")
+                                asyncio.run_coroutine_threadsafe(pins[0].unpin(), client.loop)
+                                time.sleep(3)
+                        except Exception as e:
+                            logging.info(f"Error occurred while figuring out what pin to unpin.")
 
-                                asyncio.run_coroutine_threadsafe(message.result().pin(), client.loop)
+                        asyncio.run_coroutine_threadsafe(message.result().pin(), client.loop)
 
-                    except Exception as e:
-                        logging.info(f"Error occurred, continuing.")
+            except Exception as e:
+                logging.info(f"Error occurred, continuing.")
 
                 #else:
                     #print(f"Channel with ID {channel_id} not found in guild {guild.name}")
