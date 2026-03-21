@@ -1724,18 +1724,10 @@ def send_message():
                 top_scores_message += f"{idx}. <@!{uid}>, EX Score: {ex_score}%\n"
             
             embed.set_field_at(index=-1, name="Top Server Scores", value=top_scores_message, inline=False)
-            
-            asyncio.run_coroutine_threadsafe(
-                channel.send(embed=embed, file=discord.File('scatterplot.png', filename='scatterplot.png'), allowed_mentions=discord.AllowedMentions.none()),
-                client.loop
-            )
-
-                    
-            embed.add_field(name="Top Server Scores", value=top_scores_message, inline=False)
 
             try:
                 if tracked_pack_name in data.get('pack'):
-                    message = asyncio.run_coroutine_threadsafe(channel.send(embed=embed, file=file, allowed_mentions=discord.AllowedMentions.none()), client.loop)
+                    message = asyncio.run_coroutine_threadsafe(channel.send(embed=embed, file=discord.File('scatterplot.png', filename='scatterplot.png'), allowed_mentions=discord.AllowedMentions.none()),client.loop)
 
                     # Pin any quads or quints
                     if data.get('grade') == "Grade_Tier01":
