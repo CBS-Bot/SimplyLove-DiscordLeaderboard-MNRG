@@ -1741,8 +1741,8 @@ def send_message():
                             pins = res.result()
                             logging.info(f"Number of pins found: {len(pins)}.")
                             pins.sort(key=lambda x: x.created_at)
-                            if len(pins) == 50:
-                                logging.info(f"50 pins found. Unpinning message from {pins[0].created_at}.")
+                            if len(pins) == 250:
+                                logging.info(f"250 pins found. Unpinning message from {pins[0].created_at}.")
                                 asyncio.run_coroutine_threadsafe(pins[0].unpin(), client.loop)
                                 time.sleep(3)
                         except Exception as e:
