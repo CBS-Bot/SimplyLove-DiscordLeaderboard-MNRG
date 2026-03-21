@@ -43,7 +43,7 @@ tracked_pack_name = "ITL Online 2026"
 
 
 #================================================================================================
-# Set up the Discord bot and Flask app 
+# Set up the Discord bot and Flask app
 #================================================================================================
 
 # Initialize Flask app
