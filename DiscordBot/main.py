@@ -1221,9 +1221,9 @@ def embedded_score(data, user_id, title="Users Best Score", color=discord.Color.
         upscore = round(float(data.get('exScore')) - float(data.get('prevBestEx')), 2)
         embed.add_field(name="EX Score", value=f"{data.get('exScore')}% (+ {upscore}%)", inline=True)
         embed.add_field(name="Grade", value=mapped_grade, inline=True)
-        embed.add_field(name="Length", value=data.get('length'), inline=True)
-        # embed.add_field(name="Stepartist", value=data.get('stepartist'), inline=True)
-        embed.add_field(name="Date played", value=data.get('date'), inline=True)
+        # embed.add_field(name="Length", value=data.get('length'), inline=True)
+        embed.add_field(name="Stepartist", value=data.get('stepartist'), inline=True)
+        # embed.add_field(name="Date played", value=data.get('date'), inline=True)
         embed.add_field(name="Mods", value=data.get('mods'), inline=True)
 
         # Create the scatter plot and save it as an image
