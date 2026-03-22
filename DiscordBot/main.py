@@ -1206,7 +1206,14 @@ def embedded_score(data, user_id, title="Users Best Score", color=discord.Color.
         mapped_grade = grade_mapping.get(grade, grade)
         embed = discord.Embed(title=title, color=color)
         embed.add_field(name="User", value=f"<@{user_id}>", inline=False)
-        embed.add_field(name="Song", value=data.get('songName'), inline=True)
+
+        # Hide the name of the song if it's an unlock.
+        global tracked_pack_name
+        song_name = data.get('songName')
+        if (tracked_pack_name in data.get('pack')) and ("Unlocks" in data.get('pack')):
+            song_name = "||" + song_name + "||"
+
+        embed.add_field(name="Song", value=song_name, inline=True)
         # embed.add_field(name="Artist", value=data.get('artist'), inline=True)
         embed.add_field(name="Pack", value=data.get('pack'), inline=True)
         embed.add_field(name="Difficulty", value= style + str(data.get('difficulty')), inline=True)
