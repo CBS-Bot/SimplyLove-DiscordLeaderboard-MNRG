@@ -1201,8 +1201,12 @@ def embedded_score(data, user_id, title="Users Best Score", color=discord.Color.
             style = 'D'
         else:
             style = 'S'
-            
+
+        # Make the score a quint if it's a tier 1 with 100% ex score
         grade = data.get('grade')
+        if grade == 'Grade_Tier01' and data.get('exScore') == 100:
+            grade = 'Grade_Tier00'
+
         mapped_grade = grade_mapping.get(grade, grade)
         embed = discord.Embed(title=title, color=color)
         embed.add_field(name="User", value=f"<@{user_id}>", inline=False)
@@ -1737,7 +1741,7 @@ def send_message():
                     message = asyncio.run_coroutine_threadsafe(channel.send(embed=embed, file=discord.File('scatterplot.png', filename='scatterplot.png'), allowed_mentions=discord.AllowedMentions.none()),client.loop)
 
                     # Pin any quads or quints
-                    if data.get('grade') == "Grade_Tier01":
+                    if data.get('grade') == "Grade_Tier01" or data.get('grade') == "Grade_Tier00":
 
                         # Oh this nesting sucks, but it's temporary (for now)
                         # and we don't care if this fails honestly.
