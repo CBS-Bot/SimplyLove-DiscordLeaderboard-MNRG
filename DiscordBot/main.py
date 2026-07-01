@@ -102,6 +102,7 @@ async def on_ready():
     try:
         sync = await client.tree.sync()
         print(f"Synced {len(sync)} commands.")
+        await client.user.edit(username=f"MNRG ITG Tracker (Tracking: {tracked_pack_name}")
     except Exception as e:
         print(f"An error occurred while syncing commands: {e}")
 
@@ -182,6 +183,7 @@ async def setpacktrackername(Interaction: discord.Interaction, pack_name: str):
 
     global tracked_pack_name
     tracked_pack_name = pack_name
+    await client.user.edit(username=f"MNRG ITG Tracker (Tracking: {tracked_pack_name}")
     save_runtime_config()
 
     await Interaction.response.send_message(f"Tracked pack name updated to: {tracked_pack_name}", ephemeral=True)
