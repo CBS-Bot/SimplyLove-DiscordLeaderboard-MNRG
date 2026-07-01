@@ -40,6 +40,7 @@ sys.stdout.reconfigure(line_buffering=True)
 logger = logging.getLogger(__name__)
 
 tracked_pack_name = "ITL Online 2026"
+use_money_score = False
 
 
 #================================================================================================
@@ -158,7 +159,7 @@ async def setpacktrackername(Interaction: discord.Interaction, pack_name: str):
 
     await Interaction.response.send_message(f"Tracked pack name updated to: {tracked_pack_name}", ephemeral=True)
 
-@usethischannel.error
+@setpacktrackername.error
 async def setpacktrackername_error(Interaction: discord.Interaction, error: app_commands.AppCommandError):
     if isinstance(error, app_commands.MissingPermissions):
         await Interaction.response.send_message("You do not have the required permissions to use this command.", ephemeral=True)
@@ -176,12 +177,56 @@ async def getpacktrackername(Interaction: discord.Interaction):
     global tracked_pack_name
     await Interaction.response.send_message(f"Tracked pack name currently is: {tracked_pack_name}", ephemeral=True)
 
-@usethischannel.error
+@getpacktrackername.error
 async def getpacktrackername_error(Interaction: discord.Interaction, error: app_commands.AppCommandError):
     if isinstance(error, app_commands.MissingPermissions):
         await Interaction.response.send_message("You do not have the required permissions to use this command.", ephemeral=True)
     else:
         await Interaction.response.send_message("An error occurred while trying to run this command.", ephemeral=True)
+
+
+#================================================================================================
+# Command to get/set money mode on or off
+#================================================================================================
+
+@client.tree.command(name="setmoneyscoremode", description="Set whether or not money score should be used instead. (Admin only)")
+@app_commands.checks.has_permissions(administrator=True)
+@app_commands.describe(useMoneyScore="Set true to use money score, false for EX score.")
+async def setmoneyscoremode(Interaction: discord.Interaction, useMoneyScore: bool):
+    if Interaction.guild is None:
+        await Interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
+        return
+
+    global use_money_score
+    use_money_score = useMoneyScore
+
+    await Interaction.response.send_message(f"Money Score is being used: {use_money_score}", ephemeral=True)
+
+@setmoneyscoremode.error
+async def setmoneyscoremode_error(Interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.MissingPermissions):
+        await Interaction.response.send_message("You do not have the required permissions to use this command.", ephemeral=True)
+    else:
+        await Interaction.response.send_message("An error occurred while trying to run this command.", ephemeral=True)
+
+
+@client.tree.command(name="getmoneyscoremode", description="Get the value of whether or not money score is being used. (Admin only)")
+@app_commands.checks.has_permissions(administrator=True)
+async def getmoneyscoremode(Interaction: discord.Interaction):
+    if Interaction.guild is None:
+        await Interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
+        return
+
+    global use_money_score
+    await Interaction.response.send_message(f"Money Score is being used: {use_money_score}", ephemeral=True)
+
+@getmoneyscoremode.error
+async def getmoneyscoremode_error(Interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.MissingPermissions):
+        await Interaction.response.send_message("You do not have the required permissions to use this command.", ephemeral=True)
+    else:
+        await Interaction.response.send_message("An error occurred while trying to run this command.", ephemeral=True)
+
 
 
 #================================================================================================
@@ -1221,9 +1266,16 @@ def embedded_score(data, user_id, title="Users Best Score", color=discord.Color.
         # embed.add_field(name="Artist", value=data.get('artist'), inline=True)
         embed.add_field(name="Pack", value=data.get('pack'), inline=True)
         embed.add_field(name="Difficulty", value= style + str(data.get('difficulty')), inline=True)
-        # embed.add_field(name="ITG Score", value=f"{data.get('itgScore')}%", inline=True)
         upscore = round(float(data.get('exScore')) - float(data.get('prevBestEx')), 2)
-        embed.add_field(name="EX Score", value=f"{data.get('exScore')}% (+ {upscore}%)", inline=True)
+
+        # Use the money score instead based off the setting.
+        global use_money_score
+        if (use_money_score):
+            embed.add_field(name="ITG Score", value=f"{data.get('itgScore')}%", inline=True)
+        else:
+            embed.add_field(name="EX Score", value=f"{data.get('exScore')}% (+ {upscore}%)", inline=True)
+
+
         embed.add_field(name="Grade", value=mapped_grade, inline=True)
         # embed.add_field(name="Length", value=data.get('length'), inline=True)
         embed.add_field(name="Stepartist", value=data.get('stepartist'), inline=True)
@@ -1717,7 +1769,12 @@ def send_message():
                 c.execute('SELECT channelID FROM CHANNELS WHERE serverID = ?', (str(guild.id),))
                 channel_results.extend([channel[0] for channel in c.fetchall()])
 
-        getTopScores = f'SELECT userID, exScore FROM {tableType} WHERE hash = ? ORDER BY exScore DESC'
+        global use_money_score
+        if (use_money_score):
+            getTopScores = f'SELECT userID, itgScore FROM {tableType} WHERE hash = ? ORDER BY itgScore DESC'
+        else:
+            getTopScores = f'SELECT userID, exScore FROM {tableType} WHERE hash = ? ORDER BY exScore DESC'
+
         c.execute(getTopScores, (data.get('hash'),))
         top_scores = c.fetchall()
 
@@ -1727,12 +1784,16 @@ def send_message():
             channel = client.get_channel(int(channel_id))
 
             # Filter the top scores to include only members of the current guild
-            top_selected_scores = [(uid, ex_score) for uid, ex_score in top_scores if channel.guild.get_member(int(uid))][:3]
+            top_selected_scores = [(uid, score) for uid, score in top_scores if channel.guild.get_member(int(uid))][:3]
 
             # Format the top 3 scores
             top_scores_message = ""
-            for idx, (uid, ex_score) in enumerate(top_selected_scores, start=1):
-                top_scores_message += f"{idx}. <@!{uid}>, EX Score: {ex_score}%\n"
+            for idx, (uid, score) in enumerate(top_selected_scores, start=1):
+                if (use_money_score):
+                    top_scores_message += f"{idx}. <@!{uid}>, ITG Score: {score}%\n"
+                else:
+                    top_scores_message += f"{idx}. <@!{uid}>, EX Score: {score}%\n"
+
             
             embed.set_field_at(index=-1, name="Top Server Scores", value=top_scores_message, inline=False)
 
