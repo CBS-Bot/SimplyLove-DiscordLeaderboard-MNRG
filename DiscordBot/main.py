@@ -39,7 +39,7 @@ sys.stdout.reconfigure(line_buffering=True)
 
 logger = logging.getLogger(__name__)
 
-tracked_pack_name = "ITL Online 2026"
+tracked_pack_name = "Stamina RPG 10"
 use_money_score = False
 
 
@@ -63,6 +63,32 @@ client = commands.Bot(command_prefix='!', intents=intents)
 db_folder = os.path.join(os.path.dirname(__file__), 'dbdata')
 os.makedirs(db_folder, exist_ok=True)
 database = os.path.join(db_folder, 'database.db')
+config_file = os.path.join(db_folder, 'config.json')
+
+
+def load_runtime_config():
+    global tracked_pack_name, use_money_score
+    if not os.path.exists(config_file):
+        return
+    try:
+        with open(config_file, 'r') as f:
+            data = json.load(f)
+        tracked_pack_name = data.get('tracked_pack_name', tracked_pack_name)
+        use_money_score = data.get('use_money_score', use_money_score)
+        logger.info(f"Loaded config: tracked_pack_name='{tracked_pack_name}', use_money_score={use_money_score}")
+    except Exception as e:
+        logger.warning(f"Could not load runtime config: {e}")
+
+
+def save_runtime_config():
+    try:
+        with open(config_file, 'w') as f:
+            json.dump({'tracked_pack_name': tracked_pack_name, 'use_money_score': use_money_score}, f, indent=2)
+    except Exception as e:
+        logger.warning(f"Could not save runtime config: {e}")
+
+
+load_runtime_config()
 
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 
@@ -156,6 +182,7 @@ async def setpacktrackername(Interaction: discord.Interaction, pack_name: str):
 
     global tracked_pack_name
     tracked_pack_name = pack_name
+    save_runtime_config()
 
     await Interaction.response.send_message(f"Tracked pack name updated to: {tracked_pack_name}", ephemeral=True)
 
@@ -199,6 +226,7 @@ async def setmoneyscoremode(Interaction: discord.Interaction, enabled: bool):
 
     global use_money_score
     use_money_score = enabled
+    save_runtime_config()
 
     await Interaction.response.send_message(f"Money Score is being used: {use_money_score}", ephemeral=True)
 
