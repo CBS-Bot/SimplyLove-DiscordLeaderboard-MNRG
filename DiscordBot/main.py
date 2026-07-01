@@ -1790,6 +1790,7 @@ def send_message():
 
     if isPB and submit_disabled == 'enabled':
 
+        global use_money_score
         data['date'] = datetime.now().strftime(os.getenv('DATE_FORMAT'))
         data['prevBestEx'] = existing_ex_score
         if data.get('courseName'):
@@ -1797,7 +1798,10 @@ def send_message():
         elif data.get('style') == 'double':
             color = discord.Color.blue()
         else:
-            color = discord.Color.green()
+            if use_money_score:
+                color = discord.Color.from_rgb(255,255,255)
+            else:
+                color = discord.Color.blue()
         
         embed, file = embedded_score(data, user_id, "New (Server) Personal Best!", color)
 
@@ -1811,9 +1815,8 @@ def send_message():
                 c.execute('SELECT channelID FROM CHANNELS WHERE serverID = ?', (str(guild.id),))
                 channel_results.extend([channel[0] for channel in c.fetchall()])
 
-        global use_money_score
         logging.info(f"Using money score to create embed: {use_money_score}")
-        if (use_money_score):
+        if use_money_score:
             getTopScores = f'SELECT userID, itgScore FROM {tableType} WHERE hash = ? ORDER BY itgScore DESC'
         else:
             getTopScores = f'SELECT userID, exScore FROM {tableType} WHERE hash = ? ORDER BY exScore DESC'
