@@ -192,13 +192,13 @@ async def getpacktrackername_error(Interaction: discord.Interaction, error: app_
 @client.tree.command(name="setmoneyscoremode", description="Set whether or not money score should be used instead. (Admin only)")
 @app_commands.checks.has_permissions(administrator=True)
 @app_commands.describe(useMoneyScore="Set true to use money score, false for EX score.")
-async def setmoneyscoremode(Interaction: discord.Interaction, useMoneyScore: bool):
+async def setmoneyscoremode(Interaction: discord.Interaction, enabled: bool):
     if Interaction.guild is None:
         await Interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
         return
 
     global use_money_score
-    use_money_score = useMoneyScore
+    use_money_score = enabled
 
     await Interaction.response.send_message(f"Money Score is being used: {use_money_score}", ephemeral=True)
 
