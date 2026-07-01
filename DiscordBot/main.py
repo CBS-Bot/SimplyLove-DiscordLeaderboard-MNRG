@@ -1270,6 +1270,7 @@ def embedded_score(data, user_id, title="Users Best Score", color=discord.Color.
 
         # Use the money score instead based off the setting.
         global use_money_score
+        logging.info(f"Using money score to create embed: {use_money_score}")
         if (use_money_score):
             embed.add_field(name="ITG Score", value=f"{data.get('itgScore')}%", inline=True)
         else:
@@ -1770,6 +1771,7 @@ def send_message():
                 channel_results.extend([channel[0] for channel in c.fetchall()])
 
         global use_money_score
+        logging.info(f"Using money score to create embed: {use_money_score}")
         if (use_money_score):
             getTopScores = f'SELECT userID, itgScore FROM {tableType} WHERE hash = ? ORDER BY itgScore DESC'
         else:
@@ -1778,6 +1780,7 @@ def send_message():
         c.execute(getTopScores, (data.get('hash'),))
         top_scores = c.fetchall()
 
+        logging.info(f"Scores fetched, sending to channels.")
 
         embed.add_field(name="Top Server Scores", value="", inline=False)
         for channel_id in channel_results:
@@ -1794,6 +1797,7 @@ def send_message():
                 else:
                     top_scores_message += f"{idx}. <@!{uid}>, EX Score: {score}%\n"
 
+            logging.info(f"Top scores message: {top_scores_message.strip()}")
             
             embed.set_field_at(index=-1, name="Top Server Scores", value=top_scores_message, inline=False)
 
